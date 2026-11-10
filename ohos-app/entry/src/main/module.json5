@@ -1,0 +1,47 @@
+{
+  "module": {
+    "name": "entry",
+    "type": "entry",
+    "description": "$string:module_desc",
+    "mainElement": "EntryAbility",
+    // 手机 / 平板 / 2in1 都能用（纯 CPU 光栅化渲染，与设备形态无关）。
+    "deviceTypes": ["phone", "tablet", "2in1"],
+    "deliveryWithInstall": true,
+    "installationFree": false,
+    "pages": "$profile:main_pages",
+    "abilities": [
+      {
+        "name": "EntryAbility",
+        "srcEntry": "./ets/entryability/EntryAbility.ets",
+        "description": "$string:EntryAbility_desc",
+        "icon": "$media:app_icon",
+        "label": "$string:EntryAbility_label",
+        "startWindowIcon": "$media:app_icon",
+        "startWindowBackground": "$color:start_window_background",
+        "exported": true,
+        "skills": [
+          // 主屏图标 / 直接启动。
+          {
+            "entities": ["entity.system.home"],
+            "actions": ["action.system.home"]
+          },
+          // 文件管理器「打开方式」里出现 PdfCraft：声明处理 application/pdf。
+          // EntryAbility 收到 want 时，uri 在 want.uri 里（见 EntryAbility.ets）。
+          {
+            "entities": ["entity.system.default"],
+            "actions": ["ohos.want.action.viewData"],
+            "uris": [
+              {
+                "scheme": "file",
+                "type": "application/pdf"
+              }
+            ]
+          }
+        ]
+      }
+    ],
+    // PdfCraft 是纯离线 PDF 阅读器：文件走系统文件选择器（DocumentViewPicker，
+    // 由系统按用户授权给 URI），不需要 INTERNET / GET_NETWORK_INFO 这类权限。
+    "requestPermissions": []
+  }
+}

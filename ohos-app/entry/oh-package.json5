@@ -1,0 +1,13 @@
+{
+  "name": "entry",
+  "version": "0.1.0",
+  "description": "PdfCraft 入口模块（PDF 阅读）",
+  "main": "",
+  "author": "",
+  "license": "MIT",
+  "dependencies": {
+    // 让 ArkTS 能 `import pdfc from 'libentry.so'` 并拿到类型。
+    // 路径指向 cpp/types/libentry（那里的 index.d.ts 是手写契约，须与 napi_bridge.cpp 一致）。
+    "libentry.so": "file:./src/main/cpp/types/libentry"
+  }
+}

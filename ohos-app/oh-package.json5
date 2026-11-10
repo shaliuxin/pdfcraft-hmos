@@ -1,0 +1,13 @@
+{
+  "modelVersion": "6.1.1",
+  "name": "pdfcraft_ohos",
+  "version": "0.1.0",
+  "description": "PdfCraft for HarmonyOS —— ArkTS UI + C++ NAPI 胶水层 + 纯 Rust PDF 渲染核心",
+  "main": "",
+  "author": "",
+  "license": "MIT",
+  "dependencies": {},
+  "devDependencies": {
+    "@ohos/hypium": "1.0.19"
+  }
+}

@@ -1,0 +1,35 @@
+*~
+plan/
+/target
+/dist
+/corpus
+/log
+.DS_Store
+/fuzz-out
+/assets/models
+# A craft-fonts checkout used as the optional CRAFT_FONTS_DIR build input (CI and releases put it here).
+/craft-fonts
+.claude/
+
+# ===== HarmonyOS / hvigor build outputs (large, regenerated) =====
+**/build/
+**/.cxx/
+.hvigor/
+/build/
+
+# ===== Local signing overrides (keep placeholder build-profile.json5 tracked) =====
+**/build-profile.local.json5
+**/*.local.json5
+signing/*.p7b
+signing/*.p12
+signing/*.csr
+signing/*.jks
+
+# ===== Generated packages =====
+*.hap
+*.app
+*.hsp
+
+# ===== Downloaded tarballs / local archives =====
+*.tar.gz
+*.tgz

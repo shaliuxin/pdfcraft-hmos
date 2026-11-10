@@ -1,0 +1,36 @@
+[alias]
+xtask = "run -p xtask --"
+
+# === OpenHarmony / HarmonyOS NEXT cross-compilation (pdfcraft OHOS port) ===
+# Mirrors the RustDesk port: target of a `staticlib` linked by the C++ NAPI glue
+# (libentry.so). Point the DevEco Studio SDK paths below at your machine if they
+# moved. Only the OHOS targets + the cc toolchain env are needed because pdfcraft's
+# PDF core (hayro / lopdf / skrifa / kurbo) is pure Rust — no opus/vpx/aom/sodium.
+
+[target.aarch64-unknown-linux-ohos]
+ar = "C:/ohos-sdk/default/openharmony/native/llvm/bin/llvm-ar.exe"
+linker = "C:/ohos-sdk/default/openharmony/native/llvm/bin/clang.exe"
+rustflags = [
+    "-Clink-arg=--target=aarch64-linux-ohos",
+    "-Clink-arg=--sysroot=C:/ohos-sdk/default/openharmony/native/sysroot",
+]
+
+[target.x86_64-unknown-linux-ohos]
+ar = "C:/ohos-sdk/default/openharmony/native/llvm/bin/llvm-ar.exe"
+linker = "C:/ohos-sdk/default/openharmony/native/llvm/bin/clang.exe"
+rustflags = [
+    "-Clink-arg=--target=x86_64-linux-ohos",
+    "-Clink-arg=--sysroot=C:/ohos-sdk/default/openharmony/native/sysroot",
+]
+
+[env]
+CC_aarch64_unknown_linux_ohos = "C:/ohos-sdk/default/openharmony/native/llvm/bin/clang.exe"
+AR_aarch64_unknown_linux_ohos = "C:/ohos-sdk/default/openharmony/native/llvm/bin/llvm-ar.exe"
+CXX_aarch64_unknown_linux_ohos = "C:/ohos-sdk/default/openharmony/native/llvm/bin/clang++.exe"
+CFLAGS_aarch64_unknown_linux_ohos = "--target=aarch64-linux-ohos --sysroot=C:/ohos-sdk/default/openharmony/native/sysroot -D__MUSL__"
+CXXFLAGS_aarch64_unknown_linux_ohos = "--target=aarch64-linux-ohos --sysroot=C:/ohos-sdk/default/openharmony/native/sysroot -D__MUSL__"
+CC_x86_64_unknown_linux_ohos = "C:/ohos-sdk/default/openharmony/native/llvm/bin/clang.exe"
+AR_x86_64_unknown_linux_ohos = "C:/ohos-sdk/default/openharmony/native/llvm/bin/llvm-ar.exe"
+CXX_x86_64_unknown_linux_ohos = "C:/ohos-sdk/default/openharmony/native/llvm/bin/clang++.exe"
+CFLAGS_x86_64_unknown_linux_ohos = "--target=x86_64-linux-ohos --sysroot=C:/ohos-sdk/default/openharmony/native/sysroot -D__MUSL__"
+CXXFLAGS_x86_64_unknown_linux_ohos = "--target=x86_64-linux-ohos --sysroot=C:/ohos-sdk/default/openharmony/native/sysroot -D__MUSL__"

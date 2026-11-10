@@ -1,0 +1,86 @@
+// 双签名配置：调试（default，真机侧载）+ 发布（release，AGC 上架）。
+//
+// ⚠ 包名铁律：本项目 bundleName = cn.shaliuxin.pdfcraft（独立，不复用旧项目包名）。
+//   .p7b 签名 Profile 绑定 bundleName + 设备 UDID，必须与本包名一致，否则
+//   hvigor 报「bundleName ... does not match ... SigningConfigs」/ DevEco 报「包名和 profile 不同」。
+//
+// 调试侧（default）：material 已清空 —— 这是为了让 DevEco「自动签名」按
+//   cn.shaliuxin.pdfcraft 重新生成一套专属证书 + Profile，而不是去校验旧的
+//   remotedesk Profile。生成步骤：
+//     File → Project Structure → Signing Configs → 选 default → 勾「自动签名」
+//     → 选设备（本机 46G0225429001073）→ 确认。DevEco 会把新的
+//     certpath / storeFile / profile / 密码自动写回下面 default.material。
+//   生成后再跑 build-hap.sh 即可正常 SignHap + 安装。
+//
+// 发布侧（release）：目前仍是占位材料（尚未为 cn.shaliuxin.pdfcraft 申请发布证书）。
+//   上架前需在 AGC 用 cn.shaliuxin.pdfcraft 新建应用、申请发布证书/Profile 并回填。
+{
+  app: {
+    signingConfigs: [
+      {
+        "name": "default",
+        "type": "HarmonyOS",
+        "material": {
+          "certpath": "C:\\Users\\mingh\\.ohos\\config\\default_ohos-app_N6MxvuxGyhW-jB-ppuhPG3609uZ_I43HwJkgifgTthw=.cer",
+          "keyAlias": "debugKey",
+          "keyPassword": "0000001A33B8B7E6415127698B0CBD73C0E553B5DFB953076DA3BC1106E174DA5CF4E65F9B5819E3C121",
+          "profile": "C:\\Users\\mingh\\.ohos\\config\\default_ohos-app_N6MxvuxGyhW-jB-ppuhPG3609uZ_I43HwJkgifgTthw=.p7b",
+          "signAlg": "SHA256withECDSA",
+          "storeFile": "C:\\Users\\mingh\\.ohos\\config\\default_ohos-app_N6MxvuxGyhW-jB-ppuhPG3609uZ_I43HwJkgifgTthw=.p12",
+          "storePassword": "0000001AF86E2EAB1E8B72FA401669F7C8B28CAFDDD3C5C8D1883D6D1B053519E55EC75F05C4B3A007AA"
+        }
+      }
+    ],
+    products: [
+      {
+        name: 'default',
+        signingConfig: 'default',
+        compatibleSdkVersion: '5.0.0(12)',
+        runtimeOS: 'HarmonyOS',
+        buildOption: {
+          strictMode: {
+            caseSensitiveCheck: true,
+            useNormalizedOHMUrl: true,
+          },
+        },
+        targetSdkVersion: '26.0.0',
+      },
+      {
+        name: 'release',
+        signingConfig: 'release',
+        compatibleSdkVersion: '5.0.0(12)',
+        runtimeOS: 'HarmonyOS',
+        buildOption: {
+          strictMode: {
+            caseSensitiveCheck: true,
+            useNormalizedOHMUrl: true,
+          },
+        },
+        targetSdkVersion: '26.0.0',
+      },
+    ],
+    buildModeSet: [
+      {
+        name: 'debug',
+      },
+      {
+        name: 'release',
+      },
+    ],
+  },
+  modules: [
+    {
+      name: 'entry',
+      srcPath: './entry',
+      targets: [
+        {
+          name: 'default',
+          applyToProducts: [
+            'default',
+            'release',
+          ],
+        },
+      ],
+    },
+  ],
+}

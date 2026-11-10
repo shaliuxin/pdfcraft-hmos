@@ -1,0 +1,4 @@
+# ArkTS 混淆规则。
+# 注意：本工程通过 napi 加载 libentry.so，并对事件 JSON 的字段名做解析，
+# 任何名称混淆都可能破坏 napi 模块解析与动态属性访问，因此整体关闭。
+-disable-obfuscation

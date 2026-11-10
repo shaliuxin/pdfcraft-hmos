@@ -1,0 +1,25 @@
+[package]
+name = "pdfcraft-ohos"
+description = "HarmonyOS C-ABI bridge over PdfCraft's pure-Rust PDF core (render + edit)"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish = false
+
+# staticlib for the C++ NAPI glue (libentry.so); rlib so a native test harness can drive it.
+[lib]
+name = "pdfcraft_ohos"
+crate-type = ["staticlib", "rlib"]
+
+[dependencies]
+# Path dependencies keep this crate independent of the workspace.dependencies table.
+# NOTE: pdfcraft-engine is deliberately NOT used: it pulls aws-lc-sys / boa / reqwest /
+# rten (CMake, C toolchain, JS engine, OCR models), none of which cross-compile for OHOS.
+# Every crate below is pure Rust with zero native dependencies.
+pdfcraft-render   = { path = "../render" }
+pdfcraft-cos      = { path = "../cos" }
+pdfcraft-organize = { path = "../organize" }
+pdfcraft-annot    = { path = "../annot" }
+pdfcraft-forms    = { path = "../forms" }
+pdfcraft-edit     = { path = "../edit" }
+serde_json        = "1"

@@ -1,0 +1,16 @@
+{
+  "string": [
+    {
+      "name": "module_desc",
+      "value": "PdfCraft 纯 Rust PDF 阅读器"
+    },
+    {
+      "name": "EntryAbility_desc",
+      "value": "PdfCraft 纯 Rust PDF 阅读器"
+    },
+    {
+      "name": "EntryAbility_label",
+      "value": "PdfCraft"
+    }
+  ]
+}

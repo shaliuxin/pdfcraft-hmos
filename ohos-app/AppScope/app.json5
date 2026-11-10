@@ -1,0 +1,21 @@
+{
+  "app": {
+    // 正式目标包名：cn.shaliuxin.pdfcraft（与程序名 "PdfCraft" 对齐、独立于 RustDesk）。
+    // ⚠ 华为要求 p7b 签名 Profile 里绑定的包名与这里一致（不一致安装即报 9568257 / 9568322，
+    //    hvigor 打包阶段会直接报「bundleName ... does not match ... SigningConfigs」）。
+    //
+    // 当前 ~/.ohos/config 里没有绑定 cn.shaliuxin.pdfcraft 的调试 Profile，
+    // 所以「直接 build-hap.sh」会卡在建签这一步。要出这个包名的 HAP，只需在 DevEco 里做
+    // 一次「自动签名」（服务端会按此包名 + 你的登录账号 + 设备 UDID 生成 p7b，并自动回写
+    // build-profile.json5 的 material 段），之后 build-hap.sh 即可直接产出可装 HAP。
+    // 生成 Profile 的前置条件：设备 46G0225429001073 已连接 + 登录 DevEco 的华为账号。
+    "bundleName": "cn.shaliuxin.pdfcraft",
+    "vendor": "shaliuxin",
+    "versionCode": 2000,
+    "versionName": "0.20.0",
+    "icon": "$media:app_icon",
+    "label": "$string:app_name",
+    "minAPIVersion": 12,
+    "targetAPIVersion": 26
+  }
+}
