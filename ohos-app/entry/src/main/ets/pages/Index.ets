@@ -19,7 +19,7 @@ const TAG: string = 'Index';
 const PREF_NAME: string = 'pdfcraft-prefs';
 const RECENT_MAX: number = 8;
 // 应用版本号（跟随上游 pdfcraft workspace 版本，与 AppScope/app.json5 的 versionName 保持一致）
-const APP_VERSION: string = '0.20.0';
+const APP_VERSION: string = '0.21.1';
 const APP_NAME: string = 'PdfCraft';
 const APP_BUNDLE: string = 'cn.shaliuxin.pdfcraft';
 

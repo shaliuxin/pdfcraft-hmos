@@ -11,8 +11,8 @@
     // 生成 Profile 的前置条件：设备 46G0225429001073 已连接 + 登录 DevEco 的华为账号。
     "bundleName": "cn.shaliuxin.pdfcraft",
     "vendor": "shaliuxin",
-    "versionCode": 2000,
-    "versionName": "0.20.0",
+    "versionCode": 2101,
+    "versionName": "0.21.1",
     "icon": "$media:app_icon",
     "label": "$string:app_name",
     "minAPIVersion": 12,
