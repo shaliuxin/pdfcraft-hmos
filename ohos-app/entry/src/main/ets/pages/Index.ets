@@ -13,6 +13,8 @@ import { image } from '@kit.ImageKit';
 import { hilog } from '@kit.PerformanceAnalysisKit';
 import { preferences } from '@kit.ArkData';
 import { i18n } from '@kit.LocalizationKit';
+// 设备形态：按 @ohos.deviceInfo.deviceType 判定手机 vs 桌面（tablet/2in1），见 craft 总纲 §39。
+import deviceInfo from '@ohos.deviceInfo';
 
 const DOMAIN: number = 0x3200;
 const TAG: string = 'Index';
@@ -236,6 +238,15 @@ struct Index {
   // 界面语言（'zh' / 'en'），初始跟随系统，用户可手动切换
   @State lang: string = 'zh';
 
+  // ---- 设备形态（手机 vs 桌面/平板）----
+  // 按 craft 总纲 §39：手机界面必须由「设备类型」启用，不能用 cfg!(ohos)。
+  // 鸿蒙侧用 @ohos.deviceInfo.deviceType：仅 'phone' 走手机紧凑布局，
+  // 其余（'tablet' / '2in1' / 'pc'）走完整桌面 chrome。探测失败降级 desktop（更安全）。
+  // deviceClass 是「按设备类型自动探测」的结果；layoutOverride 是用户手动覆盖
+  // （'auto' = 跟随 deviceClass；'phone'/'desktop' = 强制），默认 auto。
+  @State deviceClass: string = 'desktop';    // 自动探测结果：'phone' | 'desktop'
+  @State layoutOverride: string = 'auto';     // 'auto' | 'phone' | 'desktop'
+
   // 设置/关于对话框：showSettings 控制显隐，settingsTab 切换 通用(general) / 关于(about)
   @State showSettings: boolean = false;
   @State settingsTab: string = 'general';
@@ -285,6 +296,8 @@ struct Index {
   private docPicker: picker.DocumentViewPicker = new picker.DocumentViewPicker(getContext(this));
 
   aboutToAppear(): void {
+    this.detectDevice();
+    this.loadLayoutOverride();
     this.initLangFromSystem();
     this.loadRecent();
     const uri: string | undefined = AppStorage.get<string>('pendingPdfUri');
@@ -292,6 +305,53 @@ struct Index {
       AppStorage.delete('pendingPdfUri');
       this.loadPdf(uri);
     }
+  }
+
+  // 设备形态探测（craft 总纲 §39）：仅 deviceType === 'phone' 走手机布局，
+  // 其余（tablet / 2in1 / pc）走桌面；异常或读不到时降级 desktop。
+  private detectDevice(): void {
+    try {
+      const dt: string = deviceInfo.deviceType; // 'phone' | 'tablet' | '2in1' | 'wearable' | 'tv' | ...
+      this.deviceClass = dt === 'phone' ? 'phone' : 'desktop';
+      hilog.info(DOMAIN, TAG, `detectDevice: deviceType=${dt} -> deviceClass=${this.deviceClass}`);
+    } catch (e) {
+      this.deviceClass = 'desktop'; // 探测失败降级桌面（更安全：不至于把 PC 用废）
+      hilog.warn(DOMAIN, TAG, `detectDevice failed, default desktop: ${(e as Error).message}`);
+    }
+  }
+
+  // 恢复用户手动形态覆盖（Preferences，默认 'auto' = 跟随设备类型）
+  private loadLayoutOverride(): void {
+    try {
+      const ctx = getContext(this);
+      const pref = preferences.getPreferencesSync(ctx, { name: PREF_NAME });
+      const saved: string = pref.getSync('layoutOverride', 'auto') as string;
+      if (saved === 'auto' || saved === 'phone' || saved === 'desktop') {
+        this.layoutOverride = saved;
+      }
+    } catch (e) { /* 忽略，保持默认 auto */ }
+  }
+
+  // 最终是否手机布局：手动覆盖优先，否则跟随设备类型探测结果
+  private isPhoneMode(): boolean {
+    if (this.layoutOverride === 'phone') {
+      return true;
+    }
+    if (this.layoutOverride === 'desktop') {
+      return false;
+    }
+    return this.deviceClass === 'phone';
+  }
+
+  // 设置页手动切换形态（写 Preferences 持久化）
+  private setLayoutOverride(v: string): void {
+    this.layoutOverride = v;
+    try {
+      const ctx = getContext(this);
+      const pref = preferences.getPreferencesSync(ctx, { name: PREF_NAME });
+      pref.putSync('layoutOverride', v);
+      pref.flushSync();
+    } catch (e) { /* 忽略 */ }
   }
 
   // 语言辅助：按当前 lang 返回对应文案
@@ -1417,49 +1477,193 @@ struct Index {
   // 顶栏(tab strip, 灰) → 模式条(mode bar, 白) → 中间 Row(左工具栏 | 画布/首页 | 右面板栏) → 状态栏
   build() {
     Stack({ alignContent: Alignment.TopStart }) {
-      Column() {
-        this.titlebar();
-        this.modebar();
-
-        Row() {
-          if (this.hasDoc) {
-            if (this.showActions) {
-              this.actionList();
-            } else {
-              this.leftRail();
-            }
-          }
-          this.centerView();
-          if (this.hasDoc) {
-            if (this.panelOpen !== '') {
-              this.wideRightPanel();
-            }
-            this.rightRail();
-          }
-        }
-        .width('100%')
-        .layoutWeight(1)
-        .align(Alignment.Top)
-        .clip(true)
-
-        this.statusBar();
+      // 手机布局（紧凑单栏）vs 桌面/平板布局（完整 chrome），按形态切换（craft 总纲 §39）
+      if (this.isPhoneMode()) {
+        this.mobileMain();
+      } else {
+        this.desktopMain();
       }
-      .width('100%')
-      .height('100%')
-      .backgroundColor(this.c().bg)
 
-      // 打开加密 PDF 时的密码框（全屏遮罩）
+      // 手机抽屉（左滑出）：仅手机布局显示
+      if (this.mobileDrawerOpen && this.isPhoneMode()) {
+        Stack({ alignContent: Alignment.Start }) {
+          Column().width('100%').height('100%').backgroundColor('#80000000')
+            .onClick(() => { this.mobileDrawerOpen =false; })
+          this.mobileDrawer();
+        }
+        .width('100%').height('100%')
+      }
+
+      // 手机面板（全屏浮层）：phone 模式下点开面板时盖住内容，风格对齐桌面面板
+      if (this.isPhoneMode() && this.panelOpen !== '') {
+        this.mobilePanelSheet();
+      }
+
+      // 打开加密 PDF 时的密码框（全屏遮罩）——两套布局通用
       if (this.needPassword) {
         this.passwordDialog();
       }
 
-      // 设置 / 关于对话框（全屏遮罩，通用 + 关于两个标签页）
+      // 设置 / 关于对话框（全屏遮罩，通用 + 关于两个标签页）——两套布局通用
       if (this.showSettings) {
         this.settingsDialog();
       }
     }
     .width('100%')
     .height('100%');
+  }
+
+  // ---- 桌面 / 平板布局（完整 chrome：标题条 + 模式条 + 左右面板 + 状态栏）----
+  // 对齐原版 ui-egui 的 Acrobat 风格；tablet / 2in1 / pc 走这里。
+  @Builder
+  desktopMain() {
+    Column() {
+      this.titlebar();
+      this.modebar();
+
+      Row() {
+        if (this.hasDoc) {
+          if (this.showActions) {
+            this.actionList();
+          } else {
+            this.leftRail();
+          }
+        }
+        this.centerView();
+        if (this.hasDoc) {
+          if (this.panelOpen !== '') {
+            this.wideRightPanel();
+          }
+          this.rightRail();
+        }
+      }
+      .width('100%')
+      .layoutWeight(1)
+      .align(Alignment.Top)
+      .clip(true)
+
+      this.statusBar();
+    }
+    .width('100%')
+    .height('100%')
+    .backgroundColor(this.c().bg)
+  }
+
+  // ---- 手机布局（紧凑单栏）----
+  // phone 走这里；Step 2 会填充完整紧凑 chrome（顶栏/底栏/抽屉）。当前为最小可用版：
+  // 精简顶栏 + 复用中心内容区（welcome / 画布），保证先能跑通、再逐步增强。
+  @Builder
+  mobileMain() {
+    Column() {
+      this.mobileTopBar();
+      Column() {
+        this.centerView();
+      }
+      .layoutWeight(1).width('100%')
+      this.mobileBottomBar();
+    }
+    .width('100%')
+    .height('100%')
+    .backgroundColor(this.c().bg)
+  }
+
+  // 手机顶栏（精简）：图标 + 标题 + 抽屉/主题/设置入口
+  @Builder
+  mobileTopBar() {
+    Row() {
+      Image($r('app.media.app_icon')).width(22).height(22).borderRadius(5);
+      Text(this.hasDoc ? this.docName : 'PdfCraft')
+        .fontSize(14).fontColor(this.c().text).layoutWeight(1).margin({ left: 8 })
+        .maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis })
+      Text('☰').fontSize(20).fontColor(this.c().text).width(40).height(40).textAlign(TextAlign.Center)
+        .onClick(() => this.openMobileDrawer())
+      Text(this.themeDark ? '☀' : '🌙').fontSize(16).fontColor(this.c().text)
+        .width(40).height(40).textAlign(TextAlign.Center).onClick(() => this.toggleTheme())
+    }
+    .width('100%').height(48).padding({ left: 12, right: 10 })
+    .backgroundColor(this.c().titlebar)
+    .border({ width: { bottom: 1 }, color: this.c().divider })
+  }
+
+  // 手机底栏（精简）：翻页 / 缩放 / 连续视图 + 打开文件
+  @Builder
+  mobileBottomBar() {
+    Row() {
+      Text('‹').fontSize(20).fontColor(this.c().text).width(44).textAlign(TextAlign.Center)
+        .onClick(() => this.prevPage())
+      Text('›').fontSize(20).fontColor(this.c().text).width(44).textAlign(TextAlign.Center)
+        .onClick(() => this.nextPage())
+      Text(`${Math.round(this.uiZoom * 100)}%`).fontSize(12).fontColor(this.c().sub)
+        .width(52).textAlign(TextAlign.Center)
+      Text(this.continuous ? '⤢' : '⇄').fontSize(16).fontColor(this.c().text)
+        .width(44).textAlign(TextAlign.Center).onClick(() => this.toggleLayout())
+      Text('＋').fontSize(20).fontColor(this.c().text).width(44).textAlign(TextAlign.Center)
+        .onClick(() => this.openFile())
+      Text('⚙').fontSize(16).fontColor(this.c().text).width(44).textAlign(TextAlign.Center)
+        .onClick(() => this.openSettings('general'))
+    }
+    .width('100%').height(52).justifyContent(FlexAlign.SpaceAround)
+    .backgroundColor(this.c().bar)
+    .border({ width: { top: 1 }, color: this.c().divider })
+  }
+
+  // 手机抽屉（左滑出）：模式切换 + 工具 + 面板 + 设置
+  // 注意：@Builder 用字符串参数 + 内联 onClick（不用闭包参数，规避 ArkUI 部分版本对
+  // 闭包参数/内部调用的限制）。
+  @State mobileDrawerOpen: boolean = false;
+  @Builder
+  mobileDrawer() {
+    Column() {
+      this.mobileTopBar();
+      Scroll() {
+        Column() {
+          // 模式
+          this.mobileSectionLabel(this.t('模式', 'Mode'));
+          Flex({ wrap: FlexWrap.Wrap }) {
+            this.modeTab('alltools', this.t('全部工具', 'All tools'));
+            this.modeTab('edit', this.t('编辑', 'Edit'));
+            this.modeTab('convert', this.t('转换', 'Convert'));
+            this.modeTab('esign', this.t('签名', 'E-Sign'));
+          }.width('100%').padding({ left: 12, right: 12 })
+          // 面板
+          this.mobileSectionLabel(this.t('面板', 'Panels'));
+          Column() {
+            this.railPanelBtn('bookmarks', '❏', this.t('书签', 'Bookmarks'));
+            this.railPanelBtn('fields', '▣', this.t('表单', 'Fields'));
+            this.railPanelBtn('props', 'ⓘ', this.t('属性', 'Properties'));
+            this.railPanelBtn('pages', '▤', this.t('页面', 'Pages'));
+          }.width('100%')
+          // 设置
+          this.mobileSectionLabel(this.t('设置', 'Settings'));
+          Column() {
+            Row() {
+              Text(this.t('打开文件', 'Open file')).fontSize(14).fontColor(this.c().text).layoutWeight(1).textAlign(TextAlign.Start)
+              Text('›').fontSize(16).fontColor(this.c().sub).width(28).textAlign(TextAlign.Center)
+            }.width('100%').height(44).padding({ left: 16, right: 16 })
+              .onClick(() => { this.mobileDrawerOpen =false; this.openFile(); })
+            Row() {
+              Text(this.t('设置 / 关于', 'Settings / About')).fontSize(14).fontColor(this.c().text).layoutWeight(1).textAlign(TextAlign.Start)
+              Text('›').fontSize(16).fontColor(this.c().sub).width(28).textAlign(TextAlign.Center)
+            }.width('100%').height(44).padding({ left: 16, right: 16 })
+              .onClick(() => { this.mobileDrawerOpen =false; this.openSettings('general'); })
+          }.width('100%')
+        }
+        .width('100%').padding({ bottom: 16 })
+      }
+      .layoutWeight(1).width('100%').scrollBar(BarState.Auto)
+    }
+    .width('78%').height('100%').backgroundColor(this.c().bar)
+    .border({ width: { right: 1 }, color: this.c().divider })
+  }
+
+  @Builder
+  mobileSectionLabel(label: string) {
+    Text(label).fontSize(11).fontColor(this.c().faint).width('100%')
+      .padding({ left: 16, top: 12, bottom: 4 }).textAlign(TextAlign.Start)
+  }
+
+  private openMobileDrawer(): void {
+    this.mobileDrawerOpen =true;
   }
 
   // ---- 顶栏（tab strip）：灰底，Home / 文档标签 / Open+ / 设置·主题·帮助·语言 ----
@@ -1835,6 +2039,56 @@ struct Index {
     .width(300).height('100%')
     .backgroundColor(this.c().panel)
     .border({ width: { right: 1 }, color: this.c().divider });
+  }
+
+  // 面板内容（书签/属性/字段/页面）——桌面宽面板与手机全屏面板共用此内容体。
+  @Builder
+  panelBody() {
+    if (this.panelOpen === 'bookmarks') {
+      if (this.outlineItems.length === 0) {
+        Text(this.t('该文档没有书签', 'No bookmarks in this document')).fontSize(13).fontColor(this.c().sub)
+          .width('100%').textAlign(TextAlign.Center).padding({ top: 24, bottom: 24 });
+      } else {
+        Scroll() {
+          Column() {
+            ForEach(this.outlineItems, (it: OutlineItem, index: number) => {
+              Row() {
+                Text(it.title).fontSize(13).fontColor(this.c().text).maxLines(1)
+                  .textOverflow({ overflow: TextOverflow.Ellipsis }).layoutWeight(1);
+                if (it.page >= 0) { Text(`${it.page + 1}`).fontSize(11).fontColor(this.c().sub); }
+              }
+              .width('100%').padding({ left: 14, right: 14, top: 10, bottom: 10 })
+              .backgroundColor(this.curPage === it.page ? this.c().accent_soft : this.c().panel)
+              .onClick(() => this.gotoOutlinePage(it.page));
+            }, (it: OutlineItem, index: number) => `m_${index}_${it.title}`)
+          }.width('100%');
+        }.layoutWeight(1).width('100%').scrollBar(BarState.Auto);
+      }
+    } else if (this.panelOpen === 'props') {
+      this.propsBody();
+    } else if (this.panelOpen === 'fields') {
+      this.fieldsBody();
+    } else {
+      this.pagesBody();
+    }
+  }
+
+  // 手机面板（全屏浮层）：phone 模式下面板点击有视觉反馈——全屏盖住内容，顶部标题+关闭。
+  @Builder
+  mobilePanelSheet() {
+    Column() {
+      Row() {
+        Text(this.panelTitle()).fontSize(15).fontWeight(FontWeight.Bold).fontColor(this.c().text)
+          .layoutWeight(1).maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis });
+        Text('✕').fontSize(15).fontColor(this.c().sub).width(36).textAlign(TextAlign.Center)
+          .onClick(() => { this.panelOpen = ''; });
+      }
+      .width('100%').padding({ left: 16, right: 14, top: 12, bottom: 8 })
+      .border({ width: { bottom: 1 }, color: this.c().divider });
+
+      this.panelBody();
+    }
+    .width('100%').height('100%').backgroundColor(this.c().panel);
   }
 
   private panelTitle(): string {
@@ -2508,6 +2762,18 @@ struct Index {
                 () => { this.setContinuous(false); });
               this.segBtn(this.t('连续', 'Continuous'), this.continuous,
                 () => { this.setContinuous(true); });
+            }.width('100%');
+
+            // 界面形态（自动 / 手机 / 桌面）——craft 总纲 §39：手机界面按设备类型启用，
+            // 默认「自动」跟随 deviceType；手动覆盖便于 2in1 上目视手机布局。
+            this.settingLabel(this.t('界面形态', 'Layout'));
+            Row({ space: 8 }) {
+              this.segBtn(this.t('自动', 'Auto'), this.layoutOverride === 'auto',
+                () => { this.setLayoutOverride('auto'); });
+              this.segBtn(this.t('手机', 'Phone'), this.layoutOverride === 'phone',
+                () => { this.setLayoutOverride('phone'); });
+              this.segBtn(this.t('桌面', 'Desktop'), this.layoutOverride === 'desktop',
+                () => { this.setLayoutOverride('desktop'); });
             }.width('100%');
 
             // 缩放
