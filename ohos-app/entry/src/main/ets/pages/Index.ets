@@ -13,6 +13,7 @@ import { image } from '@kit.ImageKit';
 import { hilog } from '@kit.PerformanceAnalysisKit';
 import { preferences } from '@kit.ArkData';
 import { i18n } from '@kit.LocalizationKit';
+import { common, Want } from '@kit.AbilityKit';
 // 设备形态：按 @ohos.deviceInfo.deviceType 判定手机 vs 桌面（tablet/2in1），见 craft 总纲 §39。
 import deviceInfo from '@ohos.deviceInfo';
 
@@ -24,6 +25,15 @@ const RECENT_MAX: number = 8;
 const APP_VERSION: string = '0.22.0';
 const APP_NAME: string = 'PdfCraft';
 const APP_BUNDLE: string = 'cn.shaliuxin.pdfcraft';
+// 官方外链（对齐 crates/engine/src/links.rs 的 LINKS，单一事实来源）
+const LINK_DISCORD: string = 'https://discord.gg/artcraft';
+const LINK_APP_PAGE: string = 'https://getartcraft.com/apps/pdfcraft';
+const LINK_GITHUB: string = 'https://github.com/storytold/pdfcraft';
+const LINK_WEBSITE: string = 'https://getartcraft.com';
+// 关于页的开源致谢（数据来自仓库 contributors/contributors.json，非实时抓取）
+const CREDITS_CONTRIBUTORS: number = 98;
+const CREDITS_COMMITS: number = 627;
+const CREDITS_LEAD: string = '@echelon';
 
 // 渲染固定倍率：每页只按此分辨率渲染一次（足够清晰），之后缩放只改显示尺寸。
 const RENDER_SCALE: number = 3.0;
@@ -96,6 +106,36 @@ const RECOMMENDED_TOOLS: ToolCardDef[] = [
   { id: 'form',     labelZh: '准备表单', labelEn: 'Prepare a form', hue: '#8E4EE6', descZh: '文本 · 复选框 · 签名', descEn: 'Text · Checkbox · Signature', ready: true },
   { id: 'edit',     labelZh: '编辑 PDF', labelEn: 'Edit a PDF', hue: '#D63B8F', descZh: '添加文本 · 图片 · 链接', descEn: 'Add text · Image · Link', ready: true },
   { id: 'protect',  labelZh: '保护 PDF', labelEn: 'Protect a PDF', hue: '#3A6FE8', descZh: '密码 · 权限', descEn: 'Password · Permissions', ready: true },
+];
+
+// 左侧「所有工具」列表（对齐 catalog.rs TOOL_GROUPS 前 14 项 + panels/tools.rs all_tools 的 34px 行）
+interface AllToolDef { id: string; labelZh: string; labelEn: string; glyph: string; hue: string; }
+const ALL_TOOLS: AllToolDef[] = [
+  { id: 'export',      labelZh: '导出 PDF',   labelEn: 'Export a PDF',    glyph: '⤓', hue: '#3A6FE8' },
+  { id: 'fill_sign',   labelZh: '填写与签名', labelEn: 'Fill & Sign',     glyph: '✎', hue: '#8E4EE6' },
+  { id: 'edit',        labelZh: '编辑 PDF',   labelEn: 'Edit a PDF',      glyph: '🖊', hue: '#D63B8F' },
+  { id: 'create',      labelZh: '创建 PDF',   labelEn: 'Create a PDF',    glyph: '＋', hue: '#1FA88F' },
+  { id: 'combine',     labelZh: '合并文件',   labelEn: 'Combine files',   glyph: '▤', hue: '#2D9D5B' },
+  { id: 'organize',    labelZh: '组织页面',   labelEn: 'Organize pages',  glyph: '⊞', hue: '#3A6FE8' },
+  { id: 'comment',     labelZh: '添加注释',   labelEn: 'Add comments',    glyph: '💬', hue: '#E88A1A' },
+  { id: 'scan',        labelZh: '扫描和 OCR', labelEn: 'Scan & OCR',      glyph: '⌗', hue: '#5566CC' },
+  { id: 'protect',     labelZh: '保护 PDF',   labelEn: 'Protect a PDF',   glyph: '🛡', hue: '#3A6FE8' },
+  { id: 'redact',      labelZh: '标注删除',   labelEn: 'Redact a PDF',    glyph: '▭', hue: '#6B7280' },
+  { id: 'compress',    labelZh: '压缩 PDF',   labelEn: 'Compress a PDF',  glyph: '⇓', hue: '#1FA88F' },
+  { id: 'form',        labelZh: '准备表单',   labelEn: 'Prepare a form',  glyph: '▣', hue: '#8E4EE6' },
+  { id: 'stamp',       labelZh: '添加印章',   labelEn: 'Add a stamp',     glyph: '📮', hue: '#E88A1A' },
+  { id: 'certificate', labelZh: '使用证书',   labelEn: 'Use a certificate', glyph: '✓', hue: '#2D9D5B' },
+];
+
+// 顶部菜单栏（对齐原版 mode_bar 的 menu_bar_ui：文件/编辑/视图/签名/窗口/帮助）
+interface MenuDef { labelZh: string; labelEn: string; }
+const MENUS: MenuDef[] = [
+  { labelZh: '文件', labelEn: 'File' },
+  { labelZh: '编辑', labelEn: 'Edit' },
+  { labelZh: '视图', labelEn: 'View' },
+  { labelZh: '签名', labelEn: 'Sign' },
+  { labelZh: '窗口', labelEn: 'Window' },
+  { labelZh: '帮助', labelEn: 'Help' },
 ];
 
 // 最近文件（Preferences 持久化，最多 RECENT_MAX 条）
@@ -203,7 +243,7 @@ struct Index {
   private outerScroller: Scroller = new Scroller();
 
   @State hasDoc: boolean = false;
-  @State themeDark: boolean = true;
+  @State themeDark: boolean = false;
   @State continuous: boolean = false;
   @State docName: string = '';
   @State pageCount: number = 0;
@@ -235,8 +275,27 @@ struct Index {
   @State matches: Match[] = [];
   @State curMatch: number = -1;
 
+  // 左侧「所有工具」列表（对齐原版 left panel：前 14 项 + 查看更多；选中项高亮）
+  @State allToolsExpanded: boolean = false;
+  @State activeTool: string = '';
+  // 欢迎页社区卡关闭（仅本次运行，对齐原版 community_card_closed）
+  @State communityCardClosed: boolean = false;
+
+  // ---- 菜单栏下拉（对齐原版 crates/ui-egui/src/menus.rs：File/Edit/View/Sign/Window/Help + 子菜单）----
+  // openMenu: 当前打开的顶级菜单（'' | file | edit | view | sign | window | help）
+  // openSub:  当前打开的子菜单（'' | recent | protect | pages | zoom | rotate | display | panels | theme | fill）
+  @State openMenu: string = '';
+  @State openSub: string = '';
+  // 每个顶级菜单标题的窗口内 X 坐标（onAreaChange 记录），用于把下拉定位到对应标题下方
+  private menuX: Record<string, number> = {};
+  // 菜单行底部 Y（下拉的顶部），onAreaChange 记录
+  private dropdownTop: number = 84;
+
   // 界面语言（'zh' / 'en'），初始跟随系统，用户可手动切换
   @State lang: string = 'zh';
+
+  // 导出（PNG）进行中：禁用重复点击，避免并发写文件
+  @State exportBusy: boolean = false;
 
   // ---- 设备形态（手机 vs 桌面/平板）----
   // 按 craft 总纲 §39：手机界面必须由「设备类型」启用，不能用 cfg!(ohos)。
@@ -797,8 +856,120 @@ struct Index {
     }
   }
 
+  /** 在系统浏览器里打开外链（关于页 / 社区卡的 Website / GitHub / Discord）。 */
+  private openUrl(url: string): void {
+    try {
+      const context = getContext(this) as common.UIAbilityContext;
+      const want: Want = {
+        action: 'ohos.want.action.viewData',
+        entities: ['entity.system.browsable'],
+        uri: url
+      };
+      context.startAbility(want)
+        .then(() => { this.toast(this.t('已在浏览器打开', 'Opened in browser')); })
+        .catch((e: Error) => { this.toast(this.t('无法打开：', 'Could not open: ') + url + ' ' + (e && e.message ? e.message : '')); });
+    } catch (e) {
+      this.toast(this.t('无法打开链接：', 'Could not open: ') + url + ' ' + String(e));
+    }
+  }
+
+  /**
+   * 导出：把某页渲染成 PNG 图片并保存到用户选择的位置。
+   * 这是当前鸿蒙引擎（pdfc.renderPage → RGBA8888）能真实完成的「导出」：
+   * renderPage 拿页位图 → createPixelMap → image.createImagePacker().packing(image/png) → 写文件。
+   * 与 saveEdited 的落盘套路一致（picker.save → openSync → writeSync）。
+   */
+  private async exportPageImage(page: number): Promise<void> {
+    if (this.handle === null) {
+      this.errMsg = this.t('没有可导出的文档', 'No document to export');
+      return;
+    }
+    if (page < 0 || page >= this.pageCount) {
+      page = this.curPage;
+    }
+    this.exportBusy = true;
+    this.errMsg = '';
+    try {
+      const r: RenderedPage | null = pdfc.renderPage(this.handle, page, RENDER_SCALE);
+      if (r === null) {
+        this.errMsg = this.t('该页渲染失败，无法导出', 'Could not render the page for export');
+        return;
+      }
+      const opt: image.InitializationOptions = {
+        size: { width: r.width, height: r.height },
+        pixelFormat: image.PixelMapFormat.RGBA_8888,
+        editable: false
+      };
+      const pm: image.PixelMap = await image.createPixelMap(r.rgba, opt);
+      const packer: image.ImagePacker = image.createImagePacker();
+      const out: ArrayBuffer = await packer.packing(pm, { format: 'image/png', quality: 100 });
+      const base: string = this.docName.replace(/\.pdf$/i, '');
+      const opts: picker.DocumentSaveOptions = new picker.DocumentSaveOptions();
+      opts.newFileNames = [base + '-p' + (page + 1) + '.png'];
+      const uris: string[] = await this.docPicker.save(opts);
+      if (!uris || uris.length === 0) {
+        this.toast(this.t('已取消导出', 'Export cancelled'));
+        return;
+      }
+      const f: fs.File = fs.openSync(uris[0], fs.OpenMode.WRITE_ONLY | fs.OpenMode.CREATE | fs.OpenMode.TRUNC);
+      fs.writeSync(f.fd, out);
+      fs.closeSync(f.fd);
+      this.toast(this.t('已导出 PNG：', 'Exported PNG: ') + uris[0]);
+    } catch (e) {
+      this.errMsg = this.t('导出失败：', 'Export failed: ') + String(e);
+    } finally {
+      this.exportBusy = false;
+    }
+  }
+
+  /** 导出入口：没有文档时先选文件；有文档则把当前页导出为 PNG 图片。 */
+  private async doExport(): Promise<void> {
+    if (this.exportBusy) {
+      return;
+    }
+    if (!this.hasDoc) {
+      try {
+        const opts: picker.DocumentSelectOptions = new picker.DocumentSelectOptions();
+        opts.maxSelectNumber = 1;
+        const uris: string[] = await this.docPicker.select(opts);
+        if (uris && uris.length > 0) {
+          await this.loadPdf(uris[0]);
+          if (this.hasDoc) {
+            await this.exportPageImage(0);
+          }
+        }
+      } catch (e) {
+        this.errMsg = this.t('选择文件出错：', 'Select file error: ') + String(e);
+      }
+      return;
+    }
+    await this.exportPageImage(this.curPage);
+  }
+
+  /** 合并 / OCR / 创建等：这些依赖桌面端原生组件（Rust 引擎 / ML 模型），
+   *  无法交叉编译进鸿蒙 .so，所以这里如实说明，而不是假装能点通（不做摆设）。 */
+  private explainDesktopOnly(kind: string): void {
+    const zh = '（' + kind + '）依赖桌面端原生引擎/模型，当前鸿蒙构建未包含，无法在此设备上完成。';
+    const en = kind + ' needs the native desktop engine/models, which are not bundled in this HarmonyOS build, so it can’t run on this device.';
+    this.errMsg = this.t(zh, en);
+    this.toast(this.t('（此功能在鸿蒙版不可用）', 'Not available in the HarmonyOS build'));
+  }
+
   /** 从工具卡或顶栏进入某类编辑工具；没有文档时先选文件。 */
   private async openTool(id: string): Promise<void> {
+    // 非「编辑面板」类工具单独分流：
+    //  · export  —— 真实可用：把当前页导出为 PNG 图片（引擎 renderPage 位图）。
+    //  · create/combine/scan/redact/compress/stamp/certificate —— 依赖桌面端原生引擎/ML 模型，
+    //    无法交叉编译进鸿蒙 .so，这里如实说明（不假装能点通）。
+    if (id === 'export') {
+      await this.doExport();
+      return;
+    }
+    // 其余非功能工具（合并/OCR/创建/标注删除/压缩/印章/证书/填写签名）统一如实说明，不假装能点通。
+    if (!this.isToolReady(id)) {
+      this.explainDesktopOnly(this.toolKindLabel(id));
+      return;
+    }
     this.editTab = id;
     this.editMsg = '';
     if (!this.hasDoc) {
@@ -859,6 +1030,16 @@ struct Index {
 
   /** 点左侧工具栏的某一类工具：选中它并展开其动作列表。 */
   private selectCategory(id: string): void {
+    // 非「编辑面板」类工具（左侧 All tools 列表里也会列出）：导出=真实；其余依赖桌面端引擎，如实说明。
+    if (id === 'export') {
+      this.doExport();
+      return;
+    }
+    // 非功能工具统一如实说明（与 openTool 保持一致）
+    if (!this.isToolReady(id)) {
+      this.explainDesktopOnly(this.toolKindLabel(id));
+      return;
+    }
     if (this.editTab === id && this.showActions) {
       this.showActions = false;
       return;
@@ -1517,36 +1698,49 @@ struct Index {
   // 对齐原版 ui-egui 的 Acrobat 风格；tablet / 2in1 / pc 走这里。
   @Builder
   desktopMain() {
-    Column() {
-      this.titlebar();
-      this.modebar();
+    Stack({ alignContent: Alignment.TopStart }) {
+      Column() {
+        this.titlebar();
+        this.modebar();
 
-      Row() {
-        if (this.hasDoc) {
-          if (this.showActions) {
+        Row() {
+          // 左侧面板：欢迎页显示「所有工具」列表；打开文档且展开动作时换成动作面板
+          if (this.hasDoc && this.showActions) {
             this.actionList();
           } else {
             this.leftRail();
           }
-        }
-        this.centerView();
-        if (this.hasDoc) {
-          if (this.panelOpen !== '') {
-            this.wideRightPanel();
+          this.centerView();
+          if (this.hasDoc) {
+            if (this.panelOpen !== '') {
+              this.wideRightPanel();
+            }
+            this.rightRail();
           }
-          this.rightRail();
         }
+        .width('100%')
+        .layoutWeight(1)
+        .align(Alignment.Top)
+        .clip(true)
+
+        this.statusBar();
       }
       .width('100%')
-      .layoutWeight(1)
-      .align(Alignment.Top)
-      .clip(true)
+      .height('100%')
+      .backgroundColor(this.c().bg)
 
-      this.statusBar();
+      // 菜单栏下拉浮层（对齐原版 menus.rs）：透明遮罩点击外部即关 + 定位到对应标题下方的下拉
+      if (this.openMenu !== '') {
+        Column().width('100%').height('100%')
+          .backgroundColor('#00000000').onClick(() => this.closeMenus());
+        this.menuDropdown();
+        if (this.openSub !== '') {
+          this.subDropdown();
+        }
+      }
     }
     .width('100%')
     .height('100%')
-    .backgroundColor(this.c().bg)
   }
 
   // ---- 手机布局（紧凑单栏）----
@@ -1618,23 +1812,23 @@ struct Index {
       Scroll() {
         Column() {
           // 模式
-          this.mobileSectionLabel(this.t('模式', 'Mode'));
+          this.mobileSectionLabel('模式', 'Mode');
           Flex({ wrap: FlexWrap.Wrap }) {
-            this.modeTab('alltools', this.t('全部工具', 'All tools'));
-            this.modeTab('edit', this.t('编辑', 'Edit'));
-            this.modeTab('convert', this.t('转换', 'Convert'));
-            this.modeTab('esign', this.t('签名', 'E-Sign'));
+            this.modeTab('alltools', '全部工具', 'All tools');
+            this.modeTab('edit', '编辑', 'Edit');
+            this.modeTab('convert', '转换', 'Convert');
+            this.modeTab('esign', '签名', 'E-Sign');
           }.width('100%').padding({ left: 12, right: 12 })
           // 面板
-          this.mobileSectionLabel(this.t('面板', 'Panels'));
+          this.mobileSectionLabel('面板', 'Panels');
           Column() {
-            this.railPanelBtn('bookmarks', '❏', this.t('书签', 'Bookmarks'));
-            this.railPanelBtn('fields', '▣', this.t('表单', 'Fields'));
-            this.railPanelBtn('props', 'ⓘ', this.t('属性', 'Properties'));
-            this.railPanelBtn('pages', '▤', this.t('页面', 'Pages'));
+            this.railPanelBtn('bookmarks', 'ic_bookmark.svg', '书签', 'Bookmarks');
+            this.railPanelBtn('fields', 'ic_fields.svg', '表单', 'Fields');
+            this.railPanelBtn('props', 'ic_info.svg', '属性', 'Properties');
+            this.railPanelBtn('pages', 'ic_pages.svg', '页面', 'Pages');
           }.width('100%')
           // 设置
-          this.mobileSectionLabel(this.t('设置', 'Settings'));
+          this.mobileSectionLabel('设置', 'Settings');
           Column() {
             Row() {
               Text(this.t('打开文件', 'Open file')).fontSize(14).fontColor(this.c().text).layoutWeight(1).textAlign(TextAlign.Start)
@@ -1657,8 +1851,8 @@ struct Index {
   }
 
   @Builder
-  mobileSectionLabel(label: string) {
-    Text(label).fontSize(11).fontColor(this.c().faint).width('100%')
+  mobileSectionLabel(zh: string, en: string) {
+    Text(this.t(zh, en)).fontSize(11).fontColor(this.c().faint).width('100%')
       .padding({ left: 16, top: 12, bottom: 4 }).textAlign(TextAlign.Start)
   }
 
@@ -1672,10 +1866,8 @@ struct Index {
     Row({ space: 6 }) {
       Image($r('app.media.app_icon')).width(20).height(20).borderRadius(4).margin({ right: 6 });
       // Home（对齐原版 icons::button "house"）
-      Text(this.hasDoc ? '⌂' : '⌂')
-        .fontSize(17)
-        .fontColor(!this.hasDoc ? this.c().accent : this.c().text)
-        .width(32).height(28).textAlign(TextAlign.Center)
+      Image($rawfile('ic_house.svg')).width(22).height(22)
+        .padding({ left: 8, right: 8, top: 5, bottom: 5 })
         .backgroundColor(!this.hasDoc ? this.c().accent_soft : this.c().bar)
         .borderRadius(6)
         .onClick(() => this.goHome());
@@ -1683,13 +1875,13 @@ struct Index {
       // 文档标签（打开时显示；对齐原版 tab：文件图标 + 名称 + 关闭✕）
       if (this.hasDoc) {
         Row({ space: 6 }) {
-          Text('📄').fontSize(13).fontColor(this.c().accent);
+          Image($rawfile('ic_file_text.svg')).width(15).height(15);
           Text(this.docName)
             .fontSize(13).fontColor(this.c().text)
             .maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis })
             .constraintSize({ maxWidth: 320 });
-          Text('✕').fontSize(12).fontColor(this.c().sub).width(18).textAlign(TextAlign.Center)
-            .onClick(() => this.goHome());
+          Image($rawfile('ic_x.svg')).width(13).height(13)
+            .padding(4).onClick(() => this.goHome());
         }
         .padding({ left: 12, right: 10, top: 4, bottom: 4 })
         .backgroundColor(this.c().bar)
@@ -1699,7 +1891,7 @@ struct Index {
 
       // Open +（对齐原版 ghost_button "plus" "Open"）
       Row({ space: 4 }) {
-        Text('＋').fontSize(15).fontColor(this.c().text);
+        Image($rawfile('ic_plus.svg')).width(18).height(18);
         Text(this.t('打开', 'Open')).fontSize(13).fontColor(this.c().text);
       }
       .padding({ left: 12, right: 12, top: 5, bottom: 5 })
@@ -1711,11 +1903,14 @@ struct Index {
       Blank();
 
       // 右侧控件（对齐原版：设置 / 主题 / 帮助 / Discord，这里把 Discord 换成语言切换以保留功能）
-      Text('⚙').fontSize(16).fontColor(this.c().text).width(30).height(28).textAlign(TextAlign.Center)
+      Image($rawfile('ic_settings.svg')).width(22).height(22)
+        .padding({ left: 6, right: 6, top: 4, bottom: 4 }).borderRadius(6)
         .onClick(() => this.openSettings('general'));
-      Text(this.themeDark ? '☀' : '🌙').fontSize(16).fontColor(this.c().text).width(30).height(28).textAlign(TextAlign.Center)
+      Image($rawfile(this.themeDark ? 'ic_moon.svg' : 'ic_sun.svg')).width(22).height(22)
+        .padding({ left: 6, right: 6, top: 4, bottom: 4 }).borderRadius(6)
         .onClick(() => { this.toggleTheme(); });
-      Text('？').fontSize(15).fontColor(this.c().text).width(28).height(28).textAlign(TextAlign.Center)
+      Image($rawfile('ic_help.svg')).width(22).height(22)
+        .padding({ left: 6, right: 6, top: 4, bottom: 4 }).borderRadius(6)
         .onClick(() => this.openSettings('about'));
       Text(this.lang === 'zh' ? 'EN' : '中').fontSize(12).fontColor(this.c().sub)
         .padding({ left: 6, right: 6, top: 3, bottom: 3 })
@@ -1729,65 +1924,362 @@ struct Index {
     .border({ width: { bottom: 1 }, color: this.c().divider });
   }
 
-  // ---- 模式条（mode bar）：白底，All tools/Edit/Convert/E-Sign + 打印·保存·属性 + 搜索框 ----
+  // ---- 模式条（对齐原版 mode_bar：菜单 + 模式 tabs + 搜索框 + 打印/保存/属性）----
   @Builder
   modebar() {
-    Row({ space: 8 }) {
-      // 模式标签（对齐原版 mode_tab：All tools / Edit / Convert / E-Sign）
-      this.modeTab('alltools', this.t('全部工具', 'All tools'));
-      this.modeTab('edit', this.t('编辑', 'Edit'));
-      this.modeTab('convert', this.t('转换', 'Convert'));
-      this.modeTab('esign', this.t('电子签名', 'E-Sign'));
+    Row({ space: 6 }) {
+      // 菜单栏（文件/编辑/视图/签名/窗口/帮助，含快捷键字母）——点击弹出下拉
+      this.menuTitle('file', '文件', 'File', 'F');
+      this.menuTitle('edit', '编辑', 'Edit', 'E');
+      this.menuTitle('view', '视图', 'View', 'V');
+      this.menuTitle('sign', '签名', 'Sign', 'S');
+      this.menuTitle('window', '窗口', 'Window', 'W');
+      this.menuTitle('help', '帮助', 'Help', 'H');
 
-      Text('').width(1).height(22).backgroundColor(this.c().divider);
+      Text('').width(1).height(22).backgroundColor(this.c().divider).margin({ left: 4, right: 4 });
 
-      if (this.hasDoc) {
-        Text('🖨').fontSize(16).fontColor(this.c().text).width(32).height(30).textAlign(TextAlign.Center)
-          .onClick(() => this.status(this.t('打印（开发中）', 'Print (not yet available)')));
-        Text('💾').fontSize(16).fontColor(this.c().text).width(32).height(30).textAlign(TextAlign.Center)
-          .onClick(() => this.saveEdited());
-        Text('ⓘ').fontSize(16).fontColor(this.c().text).width(30).height(30).textAlign(TextAlign.Center)
-          .onClick(() => this.openPanel('props'));
-      }
+      // 模式标签（所有工具 / 编辑 / 转换 / 电子签名）
+      this.modeTab('alltools', '所有工具', 'All tools');
+      this.modeTab('edit', '编辑', 'Edit');
+      this.modeTab('convert', '转换', 'Convert');
+      this.modeTab('esign', '电子签名', 'E-Sign');
 
       Blank();
 
-      // 搜索框（对齐原版 search_box "Find tools and commands"，这里做文本搜索）
-      if (this.hasDoc) {
-        Row({ space: 6 }) {
-          Text('🔍').fontSize(13).fontColor(this.c().sub);
-          TextInput({ placeholder: this.t('查找文本…', 'Find text…'), text: this.searchInput })
-            .layoutWeight(1).fontSize(13).height(28)
+      // 搜索框（对齐原版 search_box "Find tools and commands"，常显，含 Ctrl+K 提示）
+      Row({ space: 6 }) {
+        Image($rawfile('ic_search.svg')).width(18).height(18);
+        if (this.hasDoc) {
+          TextInput({ placeholder: this.t('查找工具和命令…', 'Find tools and commands…'), text: this.searchInput })
+            .layoutWeight(1).fontSize(13).height(26)
             .backgroundColor(this.c().chip).fontColor(this.c().text)
             .onChange((v: string) => { this.searchInput = v; this.runSearch(); });
-          if (this.matches.length > 0) {
-            Text(`${this.curMatch + 1}/${this.matches.length}`).fontSize(11).fontColor(this.c().sub).width(34).textAlign(TextAlign.Center);
-            Text('↑').fontSize(15).fontColor(this.c().text).onClick(() => this.prevMatch());
-            Text('↓').fontSize(15).fontColor(this.c().text).onClick(() => this.nextMatch());
-          }
-          if (this.searchInput !== '') {
-            Text('✕').fontSize(13).fontColor(this.c().sub).onClick(() => {
-              this.searchInput = ''; this.matches = []; this.curMatch = -1; this.searchResults = null;
-            });
-          }
+        } else {
+          Text(this.t('查找工具和命令', 'Find tools and commands'))
+            .fontSize(13).fontColor(this.c().faint).layoutWeight(1).textAlign(TextAlign.Start);
         }
-        .width(300)
-        .padding({ left: 8, right: 6, top: 2, bottom: 2 })
-        .backgroundColor(this.c().chip)
-        .border({ width: 1, color: this.c().border })
-        .borderRadius(6);
+        Text('Ctrl+K').fontSize(10).fontColor(this.c().faint)
+          .padding({ left: 4, right: 4, top: 2, bottom: 2 })
+          .border({ width: 1, color: this.c().border }).borderRadius(4);
       }
+      .width(280)
+      .padding({ left: 8, right: 8, top: 3, bottom: 3 })
+      .backgroundColor(this.c().chip)
+      .border({ width: 1, color: this.c().border })
+      .borderRadius(6);
+
+      // 右侧文档动作（打印/保存/属性，仅打开文档时可用）
+      Image($rawfile('ic_printer.svg')).width(22).height(22).padding(5)
+        .borderRadius(6).opacity(this.hasDoc ? 1 : 0.55)
+        .onClick(() => { if (this.hasDoc) { this.status(this.t('打印（开发中）', 'Print (not yet available)')); } });
+      Image($rawfile('ic_save.svg')).width(22).height(22).padding(5)
+        .borderRadius(6).opacity(this.hasDoc ? 1 : 0.55)
+        .onClick(() => { if (this.hasDoc) { this.saveEdited(); } });
+      Image($rawfile('ic_info.svg')).width(22).height(22).padding(5)
+        .borderRadius(6).opacity(this.hasDoc ? 1 : 0.55)
+        .onClick(() => { if (this.hasDoc) { this.openPanel('props'); } });
     }
     .width('100%')
-    .padding({ left: 12, right: 14, top: 6, bottom: 6 })
+    .padding({ left: 12, right: 14, top: 5, bottom: 5 })
     .backgroundColor(this.c().bar)
     .border({ width: { bottom: 1 }, color: this.c().divider });
   }
 
+  // 顶级菜单标题（文件(F) 形式）：点击切换下拉；onAreaChange 记录自身窗口坐标供下拉定位
+  @Builder
+  menuTitle(key: string, zh: string, en: string, shortcut: string) {
+    Row({ space: 1 }) {
+      Text(this.t(zh, en)).fontSize(13).fontColor(this.openMenu === key ? this.c().accent : this.c().text);
+      Text('(' + shortcut + ')').fontSize(11).fontColor(this.c().faint);
+    }
+    .padding({ left: 8, right: 8, top: 4, bottom: 4 })
+    .backgroundColor(this.openMenu === key ? this.c().accent_soft : this.c().bar)
+    .borderRadius(5)
+    .onAreaChange((_old: Area, cur: Area) => {
+      this.menuX[key] = Number(cur.globalPosition.x);
+      this.dropdownTop = Number(cur.globalPosition.y) + Number(cur.height);
+    })
+    .onClick(() => this.toggleMenu(key));
+  }
+
+  // ---- 菜单行（对齐原版 menus.rs：项 / 分隔线 / 子菜单项 / 复选）----
+  @Builder
+  menuRow(zh: string, en: string, sc: string, checked: boolean, enabled: boolean, id: string) {
+    Row() {
+      Text(checked ? '✓' : '').width(18).fontSize(13).fontColor(this.c().accent).textAlign(TextAlign.Center);
+      Text(this.t(zh, en)).fontSize(13)
+        .fontColor(enabled ? this.c().text : this.c().faint)
+        .layoutWeight(1).maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis });
+      Text(sc).fontSize(11).fontColor(this.c().faint)
+        .width(sc === '' ? 0 : 60).textAlign(TextAlign.End);
+    }
+    .width('100%').height(34).padding({ left: 8, right: 10 })
+    .onClick(() => this.fireRow(id, enabled));
+  }
+
+  @Builder
+  menuSubRow(zh: string, en: string, sub: string) {
+    Row() {
+      Text('').width(18);
+      Text(this.t(zh, en)).fontSize(13).fontColor(this.c().text).layoutWeight(1);
+      Text('▸').fontSize(13).fontColor(this.c().faint);
+    }
+    .width('100%').height(34).padding({ left: 8, right: 10 })
+    .backgroundColor(this.openSub === sub ? this.c().accent_soft : this.c().card)
+    .onClick(() => this.openSubMenu(sub));
+  }
+
+  @Builder
+  menuSep() {
+    Divider().color(this.c().divider).strokeWidth(1).margin({ left: 10, right: 10 });
+  }
+
+  // ---- 顶级菜单内容（对齐原版 File/Edit/View/Sign/Window/Help）----
+  @Builder
+  fileMenu() {
+    this.menuRow('打开…', 'Open…', 'Ctrl+O', false, true, 'open');
+    this.menuSubRow('打开最近', 'Open Recent', 'recent');
+    this.menuSep();
+    this.menuRow('保存', 'Save', 'Ctrl+S', false, this.hasDoc, 'save');
+    this.menuRow('另存为…', 'Save As…', 'Ctrl+Shift+S', false, this.hasDoc, 'saveAs');
+    this.menuRow('导出当前页为图片…', 'Export current page as image…', '', false, this.hasDoc, 'export');
+    this.menuSep();
+    this.menuSubRow('保护', 'Protect', 'protect');
+    this.menuRow('合并文件…（仅桌面端）', 'Combine… (desktop only)', '', false, false, '__unavail');
+    this.menuSep();
+    this.menuRow('文档属性…', 'Properties…', '', false, this.hasDoc, 'props');
+    this.menuSep();
+    this.menuRow('关闭', 'Close', 'Ctrl+W', false, this.hasDoc, 'close');
+    this.menuRow('全部关闭', 'Close All', '', false, this.hasDoc, 'closeAll');
+  }
+
+  @Builder
+  editMenu() {
+    this.menuRow('撤销', 'Undo', 'Ctrl+Z', false, this.hasDoc, 'undo');
+    this.menuRow('重做', 'Redo', 'Ctrl+Shift+Z', false, this.hasDoc, 'redo');
+    this.menuSep();
+    this.menuRow('查找…', 'Find…', 'Ctrl+F', false, this.hasDoc, 'find');
+    this.menuSubRow('页面', 'Pages', 'pages');
+    this.menuSep();
+    this.menuRow('设置…', 'Preferences…', '', false, true, 'prefs');
+  }
+
+  @Builder
+  viewMenu() {
+    this.menuSubRow('缩放', 'Zoom', 'zoom');
+    this.menuRow('连续视图', 'Continuous view', '', this.continuous, this.hasDoc, 'cont');
+    this.menuSep();
+    this.menuSubRow('侧边面板', 'Side panels', 'panels');
+    this.menuSep();
+    this.menuSubRow('显示主题', 'Display theme', 'theme');
+  }
+
+  @Builder
+  signMenu() {
+    this.menuSubRow('填写与签名', 'Fill & Sign', 'fill');
+    this.menuSep();
+    this.menuRow('添加数字签名…', 'Digital signature…', '', false, this.hasDoc, 'openForm');
+  }
+
+  @Builder
+  windowMenu() {
+    this.menuRow('关闭文档', 'Close document', 'Ctrl+W', false, this.hasDoc, 'close');
+    this.menuRow('下一个标签页', 'Next tab', '', false, false, '__unavail');
+    this.menuRow('上一个标签页', 'Previous tab', '', false, false, '__unavail');
+  }
+
+  @Builder
+  helpMenu() {
+    this.menuRow('键盘快捷键', 'Keyboard shortcuts', '', false, true, 'shortcuts');
+    this.menuSep();
+    this.menuRow('PdfCraft 网站', 'PdfCraft website', '', false, true, 'website');
+    this.menuRow('GitHub 上的 PdfCraft', 'PdfCraft on GitHub', '', false, true, 'github');
+    this.menuSep();
+    this.menuRow('关于 PdfCraft', 'About PdfCraft', '', false, true, 'about');
+  }
+
+  // ---- 子菜单内容（对齐原版各子菜单：Recent / Protect / Pages / Zoom / Panels / Theme / Fill）----
+  @Builder
+  recentSub() {
+    if (this.recentFiles.length === 0) {
+      this.menuRow('没有最近文件', 'No recent files', '', false, false, '__unavail');
+    } else {
+      ForEach(this.recentFiles, (r: RecentFile) => {
+        Row() {
+          Text(r.name).fontSize(12).fontColor(this.c().text).layoutWeight(1)
+            .maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis });
+        }
+        .width('100%').height(32).padding({ left: 8, right: 10 })
+        .onClick(() => { this.closeMenus(); this.openRecent(r); });
+      }, (r: RecentFile) => 'recent_' + r.uri)
+    }
+  }
+
+  @Builder
+  subContent() {
+    if (this.openSub === 'recent') {
+      this.recentSub();
+    } else if (this.openSub === 'protect') {
+      this.menuRow('加密 (AES-256)', 'Encrypt (AES-256)', '', false, this.hasDoc, 'openProtect');
+      this.menuRow('加密 (AES-128)', 'Encrypt (AES-128)', '', false, this.hasDoc, 'openProtect');
+      this.menuRow('移除密码保护', 'Remove protection', '', false, this.hasDoc, 'openProtect');
+    } else if (this.openSub === 'pages') {
+      this.menuRow('顺时针旋转此页', 'Rotate CW', '', false, this.hasDoc, 'rotCw');
+      this.menuRow('逆时针旋转此页', 'Rotate CCW', '', false, this.hasDoc, 'rotCcc');
+      this.menuSep();
+      this.menuRow('在此页前插入空白页', 'Insert blank before', '', false, this.hasDoc, 'insertBefore');
+      this.menuRow('在此页后插入空白页', 'Insert blank after', '', false, this.hasDoc, 'insertAfter');
+      this.menuRow('复制此页', 'Duplicate pages', '', false, this.hasDoc, 'duplicate');
+      this.menuRow('删除此页', 'Delete pages', '', false, this.hasDoc, 'deletePages');
+      this.menuRow('抽取此页为新文件', 'Extract pages', '', false, this.hasDoc, 'extract');
+      this.menuRow('反转页序', 'Reverse pages', '', false, this.hasDoc, 'reverse');
+      this.menuSep();
+      this.menuRow('添加书签', 'Add bookmark', '', false, this.hasDoc, 'addBookmark');
+      this.menuRow('设置页码样式', 'Number pages', '', false, this.hasDoc, 'numberPages');
+    } else if (this.openSub === 'zoom') {
+      this.menuRow('放大', 'Zoom in', 'Ctrl++', false, this.hasDoc, 'zoomIn');
+      this.menuRow('缩小', 'Zoom out', 'Ctrl+-', false, this.hasDoc, 'zoomOut');
+      this.menuRow('实际大小', 'Actual size', 'Ctrl+0', false, this.hasDoc, 'actualSize');
+    } else if (this.openSub === 'panels') {
+      this.menuRow('书签', 'Bookmarks', '', this.panelOpen === 'bookmarks', this.hasDoc, 'panelBookmarks');
+      this.menuRow('表单字段', 'Fields', '', this.panelOpen === 'fields', this.hasDoc, 'panelFields');
+      this.menuRow('文档属性', 'Properties', '', this.panelOpen === 'props', this.hasDoc, 'panelProps');
+      this.menuRow('页面', 'Pages', '', this.panelOpen === 'pages', this.hasDoc, 'panelPages');
+    } else if (this.openSub === 'theme') {
+      this.menuRow('浅色', 'Light', '', !this.themeDark, true, 'themeLight');
+      this.menuRow('深色', 'Dark', '', this.themeDark, true, 'themeDark');
+    } else if (this.openSub === 'fill') {
+      this.menuRow('添加批注 / 便签', 'Add comment / note', '', false, this.hasDoc, 'openComment');
+      this.menuRow('添加高亮', 'Add highlight', '', false, this.hasDoc, 'openComment');
+      this.menuSep();
+      this.menuRow('添加签名域', 'Add signature field', '', false, this.hasDoc, 'openForm');
+      this.menuRow('填写表单字段', 'Fill form fields', '', false, this.hasDoc, 'openForm');
+    }
+  }
+
+  // ---- 下拉浮层（定位到对应菜单标题下方 / 子菜单向右侧弹出）----
+  @Builder
+  menuDropdown() {
+    Column() {
+      if (this.openMenu === 'file') { this.fileMenu(); }
+      else if (this.openMenu === 'edit') { this.editMenu(); }
+      else if (this.openMenu === 'view') { this.viewMenu(); }
+      else if (this.openMenu === 'sign') { this.signMenu(); }
+      else if (this.openMenu === 'window') { this.windowMenu(); }
+      else if (this.openMenu === 'help') { this.helpMenu(); }
+    }
+    .width(220)
+    .padding({ top: 6, bottom: 6 })
+    .backgroundColor(this.c().card)
+    .border({ width: 1, color: this.c().border })
+    .borderRadius(8)
+    .shadow({ radius: 16, color: '#33000000', offsetX: 0, offsetY: 3 })
+    .position({ x: this.menuAnchor(), y: this.dropdownTop });
+  }
+
+  @Builder
+  subDropdown() {
+    Column() {
+      this.subContent();
+    }
+    .width(230)
+    .padding({ top: 6, bottom: 6 })
+    .backgroundColor(this.c().card)
+    .border({ width: 1, color: this.c().border })
+    .borderRadius(8)
+    .shadow({ radius: 16, color: '#33000000', offsetX: 0, offsetY: 3 })
+    .position({ x: this.menuAnchor() + 220, y: this.dropdownTop });
+  }
+
+  // ---- 菜单行为：开关 / 定位 / 分发到真实动作（对齐原版 run_menu_command）----
+  private menuAnchor(): number {
+    const v: number = Number(this.menuX[this.openMenu]);
+    return isNaN(v) ? 12 : v;
+  }
+
+  private closeMenus(): void {
+    this.openMenu = '';
+    this.openSub = '';
+  }
+
+  private toggleMenu(key: string): void {
+    if (this.openMenu === key) { this.closeMenus(); return; }
+    this.openMenu = key;
+    this.openSub = '';
+  }
+
+  private openSubMenu(key: string): void {
+    if (this.openSub === key) { this.openSub = ''; return; }
+    this.openSub = key;
+  }
+
+  private fireRow(id: string, enabled: boolean): void {
+    if (!enabled) {
+      if (id === '__unavail') {
+        this.status(this.t('该功能在鸿蒙版暂未提供', 'Not available in the HarmonyOS build'));
+      } else {
+        this.status(this.t('请先打开一个文档', 'Please open a document first'));
+      }
+      return;
+    }
+    this.runMenuAction(id);
+  }
+
+  private runMenuAction(id: string): void {
+    this.closeMenus();
+    switch (id) {
+      case 'open': this.openFile(); break;
+      case 'save':
+      case 'saveAs': this.saveEdited(); break;
+      case 'props': this.openPanel('props'); break;
+      case 'close':
+      case 'closeAll': this.goHome(); break;
+      case 'zoomIn': this.zoomIn(); break;
+      case 'zoomOut': this.zoomOut(); break;
+      case 'actualSize': this.resetZoom(); break;
+      case 'cont': this.toggleLayout(); break;
+      case 'rotCw': this.runEditAction('rot90'); break;
+      case 'rotCcc': this.runEditAction('rot270'); break;
+      case 'insertBefore': this.runEditAction('insertBefore'); break;
+      case 'insertAfter': this.runEditAction('insertAfter'); break;
+      case 'duplicate': this.runEditAction('duplicate'); break;
+      case 'deletePages': this.runEditAction('deletePages'); break;
+      case 'extract': this.runEditAction('extract'); break;
+      case 'reverse': this.runEditAction('reverse'); break;
+      case 'addBookmark': this.runEditAction('addBookmark'); break;
+      case 'numberPages': this.runEditAction('numberPages'); break;
+      case 'undo': this.editUndo(); break;
+      case 'redo': this.editRedo(); break;
+      case 'find':
+        this.showSearch = true;
+        this.status(this.t('请在右上角搜索框输入关键词', 'Type a keyword in the search box'));
+        break;
+      case 'prefs': this.openSettings('general'); break;
+      case 'openOrganize': this.openTool('organize'); break;
+      case 'openComment': this.openTool('comment'); break;
+      case 'openForm': this.openTool('form'); break;
+      case 'openEdit': this.openTool('edit'); break;
+      case 'openProtect': this.openTool('protect'); break;
+      case 'panelBookmarks': this.openPanel('bookmarks'); break;
+      case 'panelFields': this.openPanel('fields'); break;
+      case 'panelProps': this.openPanel('props'); break;
+      case 'panelPages': this.openPanel('pages'); break;
+      case 'themeLight': this.themeDark = false; break;
+      case 'themeDark': this.themeDark = true; break;
+      case 'about': this.openSettings('about'); break;
+      case 'shortcuts': this.openSettings('about'); break;
+      case 'website': this.openUrl(LINK_APP_PAGE); break;
+      case 'github': this.openUrl(LINK_GITHUB); break;
+      case 'discord': this.openUrl(LINK_DISCORD); break;
+      case 'export': this.doExport(); break;
+      default: this.status(this.t('（开发中）', '(not yet available)')); break;
+    }
+  }
+
   // 单个模式标签按钮
   @Builder
-  modeTab(key: string, label: string) {
-    Text(label)
+  modeTab(key: string, zh: string, en: string) {
+    Text(this.t(zh, en))
       .fontSize(14)
       .fontColor(this.mode === key ? this.c().accent : this.c().text)
       .fontWeight(this.mode === key ? FontWeight.Medium : FontWeight.Normal)
@@ -1797,23 +2289,98 @@ struct Index {
       .onClick(() => this.switchMode(key));
   }
 
-  // ---- 左侧工具栏（窄）：五类工具图标（对齐原版 left panel / quick tools）----
+  // ---- 左侧面板（对齐原版 panels/tools.rs all_tools：头 + 前 14 工具行 + 查看更多）----
   @Builder
   leftRail() {
-    Column({ space: 6 }) {
-      this.railToolBtn('organize', '▤');
-      this.railToolBtn('comment', '✎');
-      this.railToolBtn('form', '▣');
-      this.railToolBtn('edit', 'A');
-      this.railToolBtn('protect', '🔒');
-      Blank();
+    Column() {
+      // 头：标题 + 展开 + 关闭（对齐 panel_header）
+      Row({ space: 6 }) {
+        Text(this.t('所有工具', 'All tools'))
+          .fontSize(15).fontWeight(FontWeight.Bold).fontColor(this.c().text)
+          .layoutWeight(1).maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis });
+        Image($rawfile('ic_expand.svg')).width(22).height(22)
+          .padding({ left: 5, right: 5, top: 5, bottom: 5 })
+          .borderRadius(6).onClick(() => { this.allToolsExpanded = !this.allToolsExpanded; });
+        Image($rawfile('ic_x.svg')).width(20).height(20)
+          .padding({ left: 6, right: 6, top: 6, bottom: 6 })
+          .borderRadius(6).onClick(() => { this.activeTool = ''; this.editTab = ''; });
+      }
+      .width('100%').padding({ left: 14, right: 12, top: 12, bottom: 8 });
+      Divider().color(this.c().divider).margin({ left: 14, right: 14 });
+
+      // 工具列表（前 14 项，34px 行；展开显示全部 14）
+      Scroll() {
+        Column() {
+          ForEach(ALL_TOOLS, (g: AllToolDef) => {
+            Row({ space: 10 }) {
+              Image($rawfile(this.toolRes(g.id))).width(20).height(20)
+                .opacity(this.isToolReady(g.id) ? 1 : 0.4);
+              Text(this.t(g.labelZh, g.labelEn))
+                .fontSize(13)
+                .fontColor(this.activeTool === g.id && this.isToolReady(g.id)
+                  ? this.c().accent
+                  : (this.isToolReady(g.id) ? this.c().text : this.c().faint))
+                .layoutWeight(1).maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis });
+            }
+            .width('100%').height(36)
+            .padding({ left: 12, right: 12 })
+            .backgroundColor(this.activeTool === g.id && this.isToolReady(g.id)
+              ? this.c().accent_soft : this.c().panel)
+            .onClick(() => { if (this.isToolReady(g.id)) { this.openAllTool(g.id); } });
+          }, (g: AllToolDef) => `all_${g.id}`)
+          // 查看更多 / 收起（对齐 all_tools 的 View more / View less 链接）
+          Text(this.allToolsExpanded ? this.t('收起', 'View less') : this.t('查看更多', 'View more'))
+            .fontSize(13).fontColor(this.c().accent).width('100%')
+            .padding({ left: 14, top: 10, bottom: 10 }).textAlign(TextAlign.Start)
+            .onClick(() => { this.allToolsExpanded = !this.allToolsExpanded; });
+        }
+        .width('100%').padding({ bottom: 10 });
+      }
+      .layoutWeight(1).width('100%').scrollBar(BarState.Auto);
     }
-    .width(52)
-    .height('100%')
-    .padding({ top: 8, bottom: 8 })
-    .backgroundColor(this.c().bar)
-    .border({ width: { right: 1 }, color: this.c().divider })
-    .alignItems(HorizontalAlign.Center);
+    .width(224).height('100%')
+    .backgroundColor(this.c().panel)
+    .border({ width: { right: 1 }, color: this.c().divider });
+  }
+
+  // 本鸿蒙构建里「真正可用」的工具白名单（有真实后端支撑）：
+  //  · export     —— 真实：当前页导出为 PNG（引擎 renderPage 位图）。
+  //  · edit/organize/comment/form/protect —— EDIT_GROUPS 里有真实动作并走 pdfc_edit_* 落盘。
+  //  其余（fill_sign/create/combine/scan/redact/compress/stamp/certificate）依赖桌面端原生引擎或
+  //  ML 模型，无法交叉编译进鸿蒙 .so，一律灰显 + 不可按，以与可用功能明确区分（不做摆设）。
+  private isToolReady(id: string): boolean {
+    return id === 'export' || id === 'edit' || id === 'organize' ||
+      id === 'comment' || id === 'form' || id === 'protect';
+  }
+
+  // 非功能工具的中文名（用于「桌面端才有」的如实提示）
+  private toolKindLabel(id: string): string {
+    switch (id) {
+      case 'combine': return '合并文件';
+      case 'scan': return '扫描 / OCR';
+      case 'create': return '创建 PDF';
+      case 'redact': return '标注删除';
+      case 'compress': return '压缩 PDF';
+      case 'stamp': return '添加印章';
+      case 'certificate': return '使用证书';
+      case 'fill_sign': return '填写与签名';
+      default: return '此功能';
+    }
+  }
+
+  // 点击「所有工具」列表项：能映射到编辑组的展开动作面板，未实现的直接忽略（已灰显不可按）
+  private openAllTool(id: string): void {
+    if (!this.isToolReady(id)) {
+      return; // 非功能按钮：保持不可按
+    }
+    this.activeTool = id;
+    if (id === 'organize' || id === 'comment' || id === 'form' || id === 'edit' || id === 'protect') {
+      this.selectCategory(id);
+    } else {
+      this.editTab = '';
+      this.showActions = false;
+      this.status(this.t('（开发中）', '(not yet available)'));
+    }
   }
 
   @Builder
@@ -1952,26 +2519,26 @@ struct Index {
   rightRail() {
     Column({ space: 6 }) {
       // 顶部：面板切换（对齐原版 right rail：Comments/Bookmarks/Pages/Fields/Attachments/Signatures/Tags）
-      this.railPanelBtn('bookmarks', '📑', this.t('书签', 'Bookmarks'));
-      this.railPanelBtn('fields', '▣', this.t('字段', 'Fields'));
-      this.railPanelBtn('props', 'ⓘ', this.t('属性', 'Props'));
-      this.railPanelBtn('pages', '▤', this.t('页面', 'Pages'));
+      this.railPanelBtn('bookmarks', 'ic_bookmark.svg', '书签', 'Bookmarks');
+      this.railPanelBtn('fields', 'ic_fields.svg', '字段', 'Fields');
+      this.railPanelBtn('props', 'ic_info.svg', '属性', 'Props');
+      this.railPanelBtn('pages', 'ic_pages.svg', '页面', 'Pages');
       Blank();
 
       // 底部：页面显示/旋转/缩放/翻页（对齐原版 rail_view_menu + 翻页簇）
-      Text('⟳').fontSize(17).fontColor(this.c().icon).width(40).height(32).textAlign(TextAlign.Center)
+      Image($rawfile('ic_rotate.svg')).width(18).height(18).padding({ left: 11, right: 11, top: 7, bottom: 7 })
         .borderRadius(6).onClick(() => { this.runEditAction('rot90'); });
-      Text(this.continuous ? '⤢' : '⤢').fontSize(16).fontColor(this.c().icon).width(40).height(30).textAlign(TextAlign.Center)
+      Image($rawfile('ic_expand.svg')).width(17).height(17).padding({ left: 11, right: 11, top: 6, bottom: 6 })
         .backgroundColor(this.continuous ? this.c().accent_soft : this.c().bar)
         .borderRadius(6).onClick(() => this.toggleLayout());
-      Text('−').fontSize(18).fontColor(this.c().icon).width(40).height(30).textAlign(TextAlign.Center)
+      Image($rawfile('ic_minus.svg')).width(17).height(17).padding({ left: 11, right: 11, top: 6, bottom: 6 })
         .borderRadius(6).onClick(() => this.zoomOut());
       Text(`${Math.round(this.uiZoom * 100)}%`).fontSize(11).fontColor(this.c().sub).width(40).height(20).textAlign(TextAlign.Center);
-      Text('+').fontSize(18).fontColor(this.c().icon).width(40).height(30).textAlign(TextAlign.Center)
+      Image($rawfile('ic_plus2.svg')).width(17).height(17).padding({ left: 11, right: 11, top: 6, bottom: 6 })
         .borderRadius(6).onClick(() => this.zoomIn());
-      Text('‹').fontSize(20).fontColor(this.c().icon).width(40).height(32).textAlign(TextAlign.Center)
+      Image($rawfile('ic_chev_left.svg')).width(18).height(18).padding({ left: 11, right: 11, top: 7, bottom: 7 })
         .borderRadius(6).onClick(() => this.prevPage());
-      Text('›').fontSize(20).fontColor(this.c().icon).width(40).height(32).textAlign(TextAlign.Center)
+      Image($rawfile('ic_chev_right.svg')).width(18).height(18).padding({ left: 11, right: 11, top: 7, bottom: 7 })
         .borderRadius(6).onClick(() => this.nextPage());
     }
     .width(56)
@@ -1983,10 +2550,10 @@ struct Index {
   }
 
   @Builder
-  railPanelBtn(key: string, glyph: string, label: string) {
+  railPanelBtn(key: string, icon: string, zh: string, en: string) {
     Column({ space: 2 }) {
-      Text(glyph).fontSize(17).fontColor(this.panelOpen === key ? this.c().accent : this.c().icon);
-      Text(label).fontSize(9).fontColor(this.panelOpen === key ? this.c().accent : this.c().faint)
+      Image($rawfile(icon)).width(18).height(18);
+      Text(this.t(zh, en)).fontSize(9).fontColor(this.panelOpen === key ? this.c().accent : this.c().faint)
         .maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis }).width(48);
     }
     .width(50).padding({ top: 6, bottom: 6 })
@@ -2109,16 +2676,16 @@ struct Index {
     } else {
       Scroll() {
         Column({ space: 8 }) {
-          this.metaRow(this.t('标题', 'Title'), this.meta.title);
-          this.metaRow(this.t('作者', 'Author'), this.meta.author);
-          this.metaRow(this.t('主题', 'Subject'), this.meta.subject);
-          this.metaRow(this.t('关键词', 'Keywords'), this.meta.keywords);
-          this.metaRow(this.t('生成者', 'Producer'), this.meta.producer);
-          this.metaRow(this.t('PDF 版本', 'PDF version'), this.meta.pdfVersion);
-          this.metaRow(this.t('文件大小', 'File size'), this.humanSize(this.meta.fileSize));
-          this.metaRow(this.t('页数', 'Pages'), `${this.meta.pages}`);
-          this.metaRow(this.t('加密', 'Encrypted'), this.meta.encrypted ? this.t('是', 'Yes') : this.t('否', 'No'));
-          this.metaRow(this.t('字体', 'Fonts'),
+          this.metaRow('标题', 'Title', this.meta.title);
+          this.metaRow('作者', 'Author', this.meta.author);
+          this.metaRow('主题', 'Subject', this.meta.subject);
+          this.metaRow('关键词', 'Keywords', this.meta.keywords);
+          this.metaRow('生成者', 'Producer', this.meta.producer);
+          this.metaRow('PDF 版本', 'PDF version', this.meta.pdfVersion);
+          this.metaRow('文件大小', 'File size', this.humanSize(this.meta.fileSize));
+          this.metaRow('页数', 'Pages', `${this.meta.pages}`);
+          this.metaRow('加密', 'Encrypted', this.meta.encrypted ? this.t('是', 'Yes') : this.t('否', 'No'));
+          this.metaRow('字体', 'Fonts',
             this.meta.fonts.length === 0 ? this.t('无', 'None') : `${this.meta.fonts.length}`);
         }
         .width('100%').padding({ left: 14, right: 14, top: 6, bottom: 20 });
@@ -2213,6 +2780,39 @@ struct Index {
         }
         .width('100%');
 
+        // ---- 社区卡（对齐 home.rs L86-113：加入 ArtCraft 社区 + 4 个链接 + 关闭✕）----
+        if (!this.communityCardClosed) {
+          Column({ space: 10 }) {
+            Row({ space: 10 }) {
+              Image($rawfile('ic_sparkles.svg')).width(22).height(22).padding(4)
+                .width(30).height(30).backgroundColor(this.c().accent_soft).borderRadius(8);
+              Column({ space: 2 }) {
+                Text(this.t('加入 ArtCraft 社区', 'Join the ArtCraft community'))
+                  .fontSize(15).fontWeight(FontWeight.Bold).fontColor(this.c().text);
+                Text(this.t('在 Discord 上获取帮助、分享反馈并关注开发动态。',
+                  'Get help, share feedback and follow development on Discord.'))
+                  .fontSize(12).fontColor(this.c().sub);
+              }
+              .layoutWeight(1).alignItems(HorizontalAlign.Start);
+              Text('✕').fontSize(14).fontColor(this.c().sub).width(28).height(28).textAlign(TextAlign.Center)
+                .borderRadius(5).onClick(() => { this.communityCardClosed = true; });
+            }
+            .width('100%');
+            Flex({ wrap: FlexWrap.Wrap, direction: FlexDirection.Row, alignContent: FlexAlign.Start }) {
+              this.communityChip('ic_discord_white.svg', '加入我们的 Discord', 'Join our Discord', true, LINK_DISCORD);
+              this.communityChip('ic_globe.svg', 'PdfCraft 网页', 'PdfCraft website', false, LINK_APP_PAGE);
+              this.communityChip('ic_github.svg', 'GitHub 上的 PdfCraft', 'PdfCraft on GitHub', false, LINK_GITHUB);
+              this.communityChip('ic_sparkles.svg', 'ArtCraft 官网', 'ArtCraft official', false, LINK_WEBSITE);
+            }
+            .width('100%');
+          }
+          .width('100%')
+          .padding(14)
+          .backgroundColor(this.c().card)
+          .border({ width: 1, color: this.c().border })
+          .borderRadius(12);
+        }
+
         // ---- 推荐工具卡容器（对齐 home.rs L115-151：card 底 + 标题 + 工具卡 + 打开文件卡）----
         Column({ space: 12 }) {
           Text(this.t('推荐工具', 'Recommended tools'))
@@ -2231,6 +2831,43 @@ struct Index {
         .backgroundColor(this.c().card)
         .border({ width: 1, color: this.c().border })
         .borderRadius(12);
+
+        // ---- 已固定的工具（对齐 home.rs L154-181：标题 + 固定工具… + 空态）----
+        Row({ space: 8 }) {
+          Text(this.t('已固定的工具', 'Pinned Tools'))
+            .fontSize(17).fontWeight(FontWeight.Bold).fontColor(this.c().text)
+            .layoutWeight(1);
+          Row({ space: 5 }) {
+            Image($rawfile('ic_pin.svg')).width(13).height(13);
+            Text(this.t('固定工具…', 'Pin a tool…')).fontSize(13).fontColor(this.c().text);
+          }
+          .padding({ left: 8, right: 8, top: 4, bottom: 4 })
+          .backgroundColor(this.c().chip).borderRadius(6)
+          .onClick(() => this.status(this.t('（开发中）', '(not yet available)')));
+        }
+        .width('100%');
+        Text(this.t('将常用的工具固定在此处以快速访问。', 'Pin your favorite tools here for quick access.'))
+          .fontSize(12).fontColor(this.c().sub)
+          .width('100%').textAlign(TextAlign.Start);
+
+        // ---- 文件夹（对齐 home.rs L183-187 folders_ui::section）----
+        Row({ space: 8 }) {
+          Text(this.t('文件夹', 'Folders'))
+            .fontSize(17).fontWeight(FontWeight.Bold).fontColor(this.c().text)
+            .layoutWeight(1);
+          Row({ space: 5 }) {
+            Image($rawfile('ic_folder.svg')).width(13).height(13);
+            Text(this.t('固定文件夹…', 'Pin a folder…')).fontSize(13).fontColor(this.c().text);
+          }
+          .padding({ left: 8, right: 8, top: 4, bottom: 4 })
+          .backgroundColor(this.c().chip).borderRadius(6)
+          .onClick(() => this.status(this.t('（开发中）', '(not yet available)')));
+        }
+        .width('100%');
+        Text(this.t('固定一个文件夹，即可在此列出其中最新的 PDF，例如扫描仪或同步云盘保存文件的位置。',
+          'Pin a folder to list its newest PDFs here, e.g. where a scanner or sync drive saves files.'))
+          .fontSize(12).fontColor(this.c().sub)
+          .width('100%').textAlign(TextAlign.Start);
 
         // ---- 最近文件（对齐 home.rs L194-259）----
         Text(this.t('最近文件', 'Recent'))
@@ -2283,10 +2920,9 @@ struct Index {
   toolCard(t: ToolCardDef) {
     Column() {
       Row({ space: 10 }) {
-        Text(this.toolGlyph(t.id))
-          .fontSize(15).fontColor('#FFFFFF')
-          .width(30).height(30).borderRadius(7)
-          .backgroundColor(t.hue).textAlign(TextAlign.Center);
+        Image($rawfile(this.toolRes(t.id))).width(20).height(20)
+          .padding(5).width(30).height(30)
+          .backgroundColor(this.c().chip).borderRadius(7);
         Text(this.t(t.labelZh, t.labelEn))
           .fontSize(13).fontWeight(FontWeight.Medium).fontColor(this.c().text)
           .maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis })
@@ -2317,7 +2953,7 @@ struct Index {
   @Builder
   openFileCard() {
     Column({ space: 12 }) {
-      Text('📂').fontSize(30);
+      Image($rawfile('ic_folder_open.svg')).width(30).height(30);
       Text(this.t('打开文件', 'Open file'))
         .fontSize(13).fontWeight(FontWeight.Bold).fontColor(this.c().text);
     }
@@ -2330,6 +2966,42 @@ struct Index {
     .alignItems(HorizontalAlign.Center)
     .justifyContent(FlexAlign.Center)
     .onClick(() => { this.openFile(); });
+  }
+
+  // 社区卡链接小按钮（对齐 home.rs community_links 的一排 chip）
+  @Builder
+  communityChip(icon: string, zh: string, en: string, primary: boolean, url: string) {
+    Row({ space: 5 }) {
+      Image($rawfile(icon)).width(14).height(14);
+      Text(this.t(zh, en)).fontSize(12).fontColor(primary ? '#FFFFFF' : this.c().text);
+    }
+    .padding({ left: 10, right: 10, top: 6, bottom: 6 })
+    .margin({ right: 8, bottom: 4 })
+    .backgroundColor(primary ? this.c().accent : this.c().chip)
+    .border({ width: 1, color: primary ? this.c().accent : this.c().border })
+    .borderRadius(6)
+    .onClick(() => this.openUrl(url));
+  }
+
+  // 工具 id → rawfile 图标文件名（对齐原版 lucide 图标，颜色已烘焙进 SVG）
+  private toolRes(id: string): string {
+    switch (id) {
+      case 'export': return 'ic_export.svg';
+      case 'fill_sign': return 'ic_fill_sign.svg';
+      case 'edit': return 'ic_edit.svg';
+      case 'create': return 'ic_create.svg';
+      case 'combine': return 'ic_combine.svg';
+      case 'organize': return 'ic_organize.svg';
+      case 'comment': return 'ic_comment.svg';
+      case 'scan': return 'ic_scan.svg';
+      case 'protect': return 'ic_protect.svg';
+      case 'redact': return 'ic_redact.svg';
+      case 'compress': return 'ic_compress.svg';
+      case 'form': return 'ic_form.svg';
+      case 'stamp': return 'ic_stamp.svg';
+      case 'certificate': return 'ic_certificate.svg';
+      default: return 'ic_plus.svg';
+    }
   }
 
   private toolGlyph(id: string): string {
@@ -2679,8 +3351,8 @@ struct Index {
 
   /** 设置面板里的一行标签（左：标签文字）。 */
   @Builder
-  settingLabel(text: string) {
-    Text(text)
+  settingLabel(zh: string, en: string) {
+    Text(this.t(zh, en))
       .fontSize(12)
       .fontColor(this.c().faint)
       .width('100%')
@@ -2690,8 +3362,8 @@ struct Index {
 
   /** 设置面板里的分段选择按钮（选中高亮 accent_soft + accent，未选 chip）。 */
   @Builder
-  segBtn(label: string, active: boolean, onTap: () => void) {
-    Text(label)
+  segBtn(zh: string, en: string, active: boolean, onTap: () => void) {
+    Text(this.t(zh, en))
       .fontSize(13)
       .fontColor(active ? this.c().accent : this.c().text)
       .layoutWeight(1)
@@ -2700,6 +3372,31 @@ struct Index {
       .backgroundColor(active ? this.c().accent_soft : this.c().chip)
       .borderRadius(8)
       .onClick(() => { onTap(); });
+  }
+
+  /** 关于页的一行「标签 + 值」。 */
+  @Builder
+  aboutInfoRow(lzh: string, len: string, vzh: string, ven: string) {
+    Row({ space: 10 }) {
+      Text(this.t(lzh, len)).fontSize(13).fontColor(this.c().sub).width(72).textAlign(TextAlign.Start);
+      Text(this.t(vzh, ven)).fontSize(13).fontColor(this.c().text).layoutWeight(1).textAlign(TextAlign.Start);
+    }.width('100%');
+  }
+
+  /** 关于页的可点击链接行（系统浏览器打开，真实跳转）。 */
+  @Builder
+  aboutLinkRow(zh: string, en: string, url: string) {
+    Row({ space: 10 }) {
+      Text(this.t(zh, en)).fontSize(13).fontColor(this.c().accent).layoutWeight(1).textAlign(TextAlign.Start);
+      Text('↗').fontSize(13).fontColor(this.c().faint);
+    }
+    .width('100%')
+    .padding({ left: 10, right: 10, top: 9, bottom: 9 })
+    .backgroundColor(this.c().chip)
+    .border({ width: 1, color: this.c().border })
+    .borderRadius(8)
+    .margin({ top: 6 })
+    .onClick(() => this.openUrl(url));
   }
 
   // 设置 / 关于对话框（通用 + 关于两个标签页）
@@ -2723,9 +3420,9 @@ struct Index {
 
         // 标签页切换：通用 / 关于
         Row({ space: 8 }) {
-          this.segBtn(this.t('通用', 'General'), this.settingsTab === 'general',
+          this.segBtn('通用', 'General', this.settingsTab === 'general',
             () => { this.settingsTab = 'general'; });
-          this.segBtn(this.t('关于', 'About'), this.settingsTab === 'about',
+          this.segBtn('关于', 'About', this.settingsTab === 'about',
             () => { this.settingsTab = 'about'; });
         }
         .width('100%')
@@ -2738,46 +3435,46 @@ struct Index {
         Column({ space: 14 }) {
           if (this.settingsTab === 'general') {
             // 外观（浅色 / 深色）
-            this.settingLabel(this.t('外观', 'Appearance'));
+            this.settingLabel('外观', 'Appearance');
             Row({ space: 8 }) {
-              this.segBtn(this.t('浅色', 'Light'), !this.themeDark,
+              this.segBtn('浅色', 'Light', !this.themeDark,
                 () => { if (this.themeDark) { this.toggleTheme(); } });
-              this.segBtn(this.t('深色', 'Dark'), this.themeDark,
+              this.segBtn('深色', 'Dark', this.themeDark,
                 () => { if (!this.themeDark) { this.toggleTheme(); } });
             }.width('100%');
 
             // 语言（中文 / English）
-            this.settingLabel(this.t('语言', 'Language'));
+            this.settingLabel('语言', 'Language');
             Row({ space: 8 }) {
-              this.segBtn(this.t('中文', 'Chinese'), this.lang === 'zh',
+              this.segBtn('中文', 'Chinese', this.lang === 'zh',
                 () => { if (this.lang !== 'zh') { this.toggleLang(); } });
-              this.segBtn('English', this.lang === 'en',
+              this.segBtn('English', 'English', this.lang === 'en',
                 () => { if (this.lang !== 'en') { this.toggleLang(); } });
             }.width('100%');
 
             // 阅读视图（单页 / 连续）
-            this.settingLabel(this.t('阅读视图', 'Reading view'));
+            this.settingLabel('阅读视图', 'Reading view');
             Row({ space: 8 }) {
-              this.segBtn(this.t('单页', 'Single page'), !this.continuous,
+              this.segBtn('单页', 'Single page', !this.continuous,
                 () => { this.setContinuous(false); });
-              this.segBtn(this.t('连续', 'Continuous'), this.continuous,
+              this.segBtn('连续', 'Continuous', this.continuous,
                 () => { this.setContinuous(true); });
             }.width('100%');
 
             // 界面形态（自动 / 手机 / 桌面）——craft 总纲 §39：手机界面按设备类型启用，
             // 默认「自动」跟随 deviceType；手动覆盖便于 2in1 上目视手机布局。
-            this.settingLabel(this.t('界面形态', 'Layout'));
+            this.settingLabel('界面形态', 'Layout');
             Row({ space: 8 }) {
-              this.segBtn(this.t('自动', 'Auto'), this.layoutOverride === 'auto',
+              this.segBtn('自动', 'Auto', this.layoutOverride === 'auto',
                 () => { this.setLayoutOverride('auto'); });
-              this.segBtn(this.t('手机', 'Phone'), this.layoutOverride === 'phone',
+              this.segBtn('手机', 'Phone', this.layoutOverride === 'phone',
                 () => { this.setLayoutOverride('phone'); });
-              this.segBtn(this.t('桌面', 'Desktop'), this.layoutOverride === 'desktop',
+              this.segBtn('桌面', 'Desktop', this.layoutOverride === 'desktop',
                 () => { this.setLayoutOverride('desktop'); });
             }.width('100%');
 
             // 缩放
-            this.settingLabel(this.t('缩放', 'Zoom'));
+            this.settingLabel('缩放', 'Zoom');
             Row({ space: 8 }) {
               Text('−').fontSize(16).fontColor(this.c().text)
                 .width(40).textAlign(TextAlign.Center)
@@ -2798,12 +3495,16 @@ struct Index {
                 .onClick(() => this.resetZoom());
             }.width('100%');
           } else {
-            // 关于页：应用名 + 版本
+            // 关于页（对齐原版 credits.rs + links.rs：标识 + 版本 + tagline + 致谢 + 链接 + 能力说明）
             Column({ space: 4 }) {
               Image($r('app.media.app_icon'))
                 .width(60).height(60).borderRadius(14)
                 .objectFit(ImageFit.Cover).margin({ bottom: 4 });
               Text(APP_NAME).fontSize(22).fontWeight(FontWeight.Bold).fontColor(this.c().text);
+              Text(this.t('开源 PDF 工作台 — 本地、私密、可编程',
+                'An open-source PDF workbench — local, private, and scriptable'))
+                .fontSize(12).fontColor(this.c().sub)
+                .textAlign(TextAlign.Center).width('100%').margin({ top: 2 });
               Text(this.t('版本', 'Version') + ' ' + APP_VERSION)
                 .fontSize(13).fontColor(this.c().accent)
                 .padding({ left: 12, right: 12, top: 4, bottom: 4 })
@@ -2811,45 +3512,41 @@ struct Index {
             }
             .width('100%')
             .alignItems(HorizontalAlign.Center)
-            .margin({ bottom: 4 });
+            .margin({ bottom: 6 });
 
             // 信息行
-            Row({ space: 10 }) {
-              Text(this.t('渲染引擎', 'Engine'))
-                .fontSize(13).fontColor(this.c().sub).width(70).textAlign(TextAlign.Start);
-              Text(this.t('纯 Rust（hayro + vello + lopdf）', 'Pure Rust (hayro + vello + lopdf)'))
-                .fontSize(13).fontColor(this.c().text).layoutWeight(1).textAlign(TextAlign.Start);
-            }.width('100%');
-            Row({ space: 10 }) {
-              Text(this.t('平台', 'Platform'))
-                .fontSize(13).fontColor(this.c().sub).width(70).textAlign(TextAlign.Start);
-              Text('HarmonyOS NEXT (API 26)').fontSize(13).fontColor(this.c().text)
-                .layoutWeight(1).textAlign(TextAlign.Start);
-            }.width('100%');
-            Row({ space: 10 }) {
-              Text(this.t('包名', 'Bundle'))
-                .fontSize(13).fontColor(this.c().sub).width(70).textAlign(TextAlign.Start);
-              Text(APP_BUNDLE).fontSize(13).fontColor(this.c().text)
-                .layoutWeight(1).textAlign(TextAlign.Start);
-            }.width('100%');
-            Row({ space: 10 }) {
-              Text(this.t('来源', 'Source'))
-                .fontSize(13).fontColor(this.c().sub).width(70).textAlign(TextAlign.Start);
-              Text('github.com/storytold/pdfcraft').fontSize(13).fontColor(this.c().text)
-                .layoutWeight(1).textAlign(TextAlign.Start);
-            }.width('100%');
+            this.aboutInfoRow('渲染引擎', 'Engine', '纯 Rust（hayro + vello + lopdf）', 'Pure Rust (hayro + vello + lopdf)');
+            this.aboutInfoRow('平台', 'Platform', 'HarmonyOS NEXT (API 26)', 'HarmonyOS NEXT (API 26)');
+            this.aboutInfoRow('包名', 'Bundle', APP_BUNDLE, APP_BUNDLE);
 
-            Text('').width('100%').height(1).backgroundColor(this.c().divider)
-              .margin({ top: 4, bottom: 2 });
+            // 开源致谢（数据来自仓库 contributors/contributors.json，非实时抓取）
+            Text(this.t('开源致谢', 'Open-source credits'))
+              .fontSize(12).fontColor(this.c().faint).width('100%').textAlign(TextAlign.Start).margin({ top: 10 });
+            Text(`${CREDITS_CONTRIBUTORS} ${this.t('位贡献者', 'contributors')} · ${CREDITS_COMMITS} ${this.t('次提交', 'commits')} · ${this.t('主维护', 'lead')} ${CREDITS_LEAD}`)
+              .fontSize(12).fontColor(this.c().sub).width('100%').textAlign(TextAlign.Start);
 
-            // 已实现的功能列表
-            Text(this.t('已实现的功能', 'Available features'))
+            // 链接（系统浏览器打开）
+            Text(this.t('链接', 'Links'))
+              .fontSize(12).fontColor(this.c().faint).width('100%').textAlign(TextAlign.Start).margin({ top: 10 });
+            this.aboutLinkRow('PdfCraft 网页', 'PdfCraft web page', LINK_APP_PAGE);
+            this.aboutLinkRow('GitHub 上的 PdfCraft', 'PdfCraft on GitHub', LINK_GITHUB);
+            this.aboutLinkRow('加入 ArtCraft 社区（Discord）', 'Join the ArtCraft Discord', LINK_DISCORD);
+
+            Text('').width('100%').height(1).backgroundColor(this.c().divider).margin({ top: 12, bottom: 6 });
+
+            // 能力说明（如实：此构建可用 / 仅桌面端）
+            Text(this.t('此鸿蒙构建包含', 'In this HarmonyOS build'))
               .fontSize(12).fontColor(this.c().faint).width('100%').textAlign(TextAlign.Start);
             Text(this.t(
-              '阅读（单页 / 连续 · 缩放 · 搜索 · 书签）\n编辑 / 转换 / 电子签名\n文档属性 · 表单 · 保护加密\n最近文件 · 深浅主题 · 中/英双语',
-              'Read (single / continuous · zoom · search · bookmarks)\nEdit / Convert / E-Sign\nDocument properties · Forms · Protect\nRecent files · Light & Dark theme · Chinese / English'
+              '阅读 · 缩放 · 搜索 · 书签 · 页面组织 · 批注 · 表单 · 保护加密 · 导出当前页为图片(PNG) · 中/英双语',
+              'Read · Zoom · Search · Bookmarks · Organize pages · Annotate · Forms · Protect/Encrypt · Export current page to PNG · Chinese/English'
             ))
-              .fontSize(13).fontColor(this.c().text).width('100%').textAlign(TextAlign.Start);
+              .fontSize(13).fontColor(this.c().text).width('100%').textAlign(TextAlign.Start).margin({ top: 3 });
+            Text(this.t(
+              '仅桌面端（需原生引擎/模型，未随本构建）：合并文件 · 扫描/OCR · 创建 PDF · 压缩 · 印章 · 标注删除',
+              'Desktop only (need native engine/models, not bundled here): Combine files · Scan/OCR · Create PDF · Compress · Stamp · Redact'
+            ))
+              .fontSize(12).fontColor(this.c().faint).width('100%').textAlign(TextAlign.Start).margin({ top: 6 });
           }
         }
         .width('100%')
@@ -2883,7 +3580,7 @@ struct Index {
   @Builder
   recentRow(r: RecentFile) {
     Row({ space: 10 }) {
-      Text('📄').fontSize(18);
+      Image($rawfile('ic_file_text.svg')).width(20).height(20);
       Column({ space: 2 }) {
         Text(r.name)
           .fontSize(13).fontColor(this.c().text)
@@ -3126,16 +3823,16 @@ struct Index {
       } else {
         Scroll() {
           Column({ space: 10 }) {
-            this.metaRow(this.t('标题', 'Title'), this.meta.title);
-            this.metaRow(this.t('作者', 'Author'), this.meta.author);
-            this.metaRow(this.t('主题', 'Subject'), this.meta.subject);
-            this.metaRow(this.t('关键词', 'Keywords'), this.meta.keywords);
-            this.metaRow(this.t('生成者', 'Producer'), this.meta.producer);
-            this.metaRow(this.t('PDF 版本', 'PDF version'), this.meta.pdfVersion);
-            this.metaRow(this.t('文件大小', 'File size'), this.humanSize(this.meta.fileSize));
-            this.metaRow(this.t('页数', 'Pages'), `${this.meta.pages}`);
-            this.metaRow(this.t('加密', 'Encrypted'), this.meta.encrypted ? this.t('是', 'Yes') : this.t('否', 'No'));
-            this.metaRow(this.t('字体', 'Fonts'),
+            this.metaRow('标题', 'Title', this.meta.title);
+            this.metaRow('作者', 'Author', this.meta.author);
+            this.metaRow('主题', 'Subject', this.meta.subject);
+            this.metaRow('关键词', 'Keywords', this.meta.keywords);
+            this.metaRow('生成者', 'Producer', this.meta.producer);
+            this.metaRow('PDF 版本', 'PDF version', this.meta.pdfVersion);
+            this.metaRow('文件大小', 'File size', this.humanSize(this.meta.fileSize));
+            this.metaRow('页数', 'Pages', `${this.meta.pages}`);
+            this.metaRow('加密', 'Encrypted', this.meta.encrypted ? this.t('是', 'Yes') : this.t('否', 'No'));
+            this.metaRow('字体', 'Fonts',
               this.meta.fonts.length === 0 ? this.t('无', 'None') : `${this.meta.fonts.length} ${this.t('个', '')}`);
             if (this.meta.fonts.length > 0) {
               ForEach(this.meta.fonts, (f: FontInfo, index: number) => {
@@ -3161,9 +3858,9 @@ struct Index {
   }
 
   @Builder
-  metaRow(label: string, value: string) {
+  metaRow(zh: string, en: string, value: string) {
     Row() {
-      Text(label)
+      Text(this.t(zh, en))
         .fontSize(12)
         .fontColor(this.c().sub)
         .width(72);

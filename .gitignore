@@ -33,3 +33,7 @@ signing/*.jks
 # ===== Downloaded tarballs / local archives =====
 *.tar.gz
 *.tgz
+
+# ===== Local device-capture debug artifacts (screenshots / layout dumps) =====
+ohos-app/*.jpeg
+ohos-app/layout.json
